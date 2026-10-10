@@ -7,8 +7,11 @@ prompt so the user notices before approving.
 
 from __future__ import annotations
 
+import os
 import re
+import signal
 import subprocess
+import sys
 from typing import Any
 
 from locoder.tools.base import Tool, ToolContext, ToolError, ToolResult, register
@@ -42,6 +45,24 @@ def _looks_destructive(command: str) -> bool:
     return bool(_DESTRUCTIVE_RE.search(command))
 
 
+def _kill_tree(proc: subprocess.Popen) -> None:
+    """Kill ``proc`` and everything it spawned. With shell=True, ``proc`` is
+    just the shell - killing only it would leave the real command running.
+    """
+    try:
+        if sys.platform == "win32":
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                capture_output=True,
+                timeout=10,
+            )
+        else:
+            os.killpg(proc.pid, signal.SIGKILL)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    proc.kill()
+
+
 def _run_command(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
     command = args["command"]
     cwd = ctx.sandbox.root
@@ -59,23 +80,33 @@ def _run_command(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
     if not ctx.confirm(label, preview):
         return ToolResult(output="user declined to run the command", is_error=True)
 
+    proc = subprocess.Popen(
+        command,
+        shell=True,
+        cwd=cwd,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        # Decode explicitly: the locale default (cp1252 on Windows) raises on
+        # any byte it can't map, which would turn ordinary output into a crash.
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        # Own process group, so a timeout can kill the whole tree on POSIX.
+        start_new_session=(sys.platform != "win32"),
+    )
     try:
-        proc = subprocess.run(
-            command,
-            shell=True,
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
+        stdout, stderr = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired as exc:
-        raise ToolError(f"command timed out after {timeout}s") from exc
+        _kill_tree(proc)
+        proc.communicate()
+        raise ToolError(f"command timed out after {timeout}s (process tree killed)") from exc
 
     parts = [f"exit code: {proc.returncode}"]
-    if proc.stdout:
-        parts.append(f"stdout:\n{proc.stdout[:OUTPUT_CAP]}")
-    if proc.stderr:
-        parts.append(f"stderr:\n{proc.stderr[:OUTPUT_CAP]}")
+    if stdout:
+        parts.append(f"stdout:\n{stdout[:OUTPUT_CAP]}")
+    if stderr:
+        parts.append(f"stderr:\n{stderr[:OUTPUT_CAP]}")
     return ToolResult(output="\n\n".join(parts), is_error=(proc.returncode != 0))
 
 

@@ -73,6 +73,8 @@ def main(argv: list[str] | None = None) -> int:
             yolo=config.yolo,
             project_root=str(project_root),
         )
+        for warning in config.warnings:
+            ui.warn(warning)
         _check_backend_reachable(provider, ui)
         repl(agent, ui, session)
         return 0

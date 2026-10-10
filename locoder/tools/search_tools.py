@@ -13,6 +13,7 @@ from typing import Any
 from locoder.tools.base import Tool, ToolContext, ToolError, ToolResult, register
 
 MAX_MATCHES = 200
+MAX_LINE_CHARS = 300  # minified/generated files can have megabyte-long lines
 IGNORED_DIRS = {".git", ".locoder", "__pycache__", "node_modules", ".venv", "venv", ".mypy_cache"}
 
 
@@ -37,11 +38,25 @@ def _search_with_ripgrep(rg: str, pattern: str, search_root: Path, ctx: ToolCont
         "never",
         "--max-count",
         str(MAX_MATCHES),
+        "--max-columns",
+        str(MAX_LINE_CHARS),
+        "--max-columns-preview",
+        # -e/-- so patterns or paths starting with "-" aren't parsed as flags
+        "-e",
         pattern,
+        "--",
         display_root,
     ]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30, cwd=ctx.sandbox.root)
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            cwd=ctx.sandbox.root,
+        )
     except subprocess.TimeoutExpired as exc:
         raise ToolError("search timed out after 30s") from exc
 
@@ -76,6 +91,8 @@ def _search_with_python(pattern: str, search_root: Path, ctx: ToolContext) -> To
             continue
         for lineno, line in enumerate(text.splitlines(), start=1):
             if regex.search(line):
+                if len(line) > MAX_LINE_CHARS:
+                    line = line[:MAX_LINE_CHARS] + " [... line truncated]"
                 matches.append(f"{ctx.sandbox.display_path(file_path)}:{lineno}:{line}")
                 if len(matches) >= MAX_MATCHES:
                     break

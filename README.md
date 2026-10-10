@@ -12,7 +12,7 @@ pip install -e .
 ## Quick start
 
 ```bash
-ollama pull qwen2.5-coder:latest   # or any tool-calling capable model
+ollama pull qwen3.5:4b              # default model; any tool-calling capable model works
 locoder                            # starts an interactive session in the current directory
 locoder --model llama3.1           # override the model for this run
 locoder --yolo                     # skip confirmation prompts for writes/edits/commands
@@ -21,6 +21,10 @@ locoder --yolo                     # skip confirmation prompts for writes/edits/
 The first run writes a starter config to `.locoder/config.yaml` in the current
 project. Edit it to change the default provider, model, base URL, temperature,
 or context window size.
+
+`yolo` and `allowed_paths` are only read from the global `~/.locoder/config.yaml`
+(or `--yolo`); a project's config can't set them, since that file may come with
+a cloned repo.
 
 ## Slash commands
 

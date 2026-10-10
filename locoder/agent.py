@@ -133,15 +133,22 @@ class Agent:
         return [s for s in schemas if s["function"]["name"] in READ_ONLY_TOOLS]
 
     def _effective_messages(self) -> list[Message]:
+        """The conversation as sent to the model: every system-role message
+        (prompt, mode note, compaction summary) merged into one leading
+        system message. Several chat templates - Qwen's included - reject
+        system messages anywhere but first.
+        """
+        system_parts = [m.content.strip() for m in self.messages if m.role == "system"]
         instructions = MODE_INSTRUCTIONS.get(self.mode)
-        if not instructions:
-            return self.messages
-        mode_note = Message(role="system", content=instructions.strip())
-        return [self.messages[0], mode_note, *self.messages[1:]]
+        if instructions:
+            system_parts.insert(1, instructions.strip())
+        rest = [m for m in self.messages if m.role != "system"]
+        return [Message(role="system", content="\n\n".join(system_parts)), *rest]
 
     def run_turn(self, user_input: str) -> None:
         self._cancel_requested.clear()
         self.messages.append(Message(role="user", content=user_input))
+        compaction_tried = False
 
         for _ in range(MAX_TOOL_ITERATIONS):
             if self._cancel_requested.is_set():
@@ -149,9 +156,15 @@ class Agent:
                 self.session.save(self.messages)
                 return
 
-            if self.ctx_manager.should_compact(self.messages):
+            # At most once per turn: if one pass can't get under the threshold
+            # (the recent tail alone is that big), retrying every iteration
+            # would just burn a summarization call each time.
+            if not compaction_tried and self.ctx_manager.should_compact(self.messages):
+                compaction_tried = True
                 self.ui.info("Context window is getting full - summarizing older turns...")
                 self.messages = self.ctx_manager.compact(self.messages, self.provider)
+                if self.ctx_manager.should_compact(self.messages):
+                    self.ui.warn("context is still nearly full after summarizing - consider /clear")
 
             final_message, error, interrupted = self._stream_completion()
             if interrupted:

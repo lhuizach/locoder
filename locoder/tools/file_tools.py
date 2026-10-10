@@ -12,10 +12,30 @@ MAX_READ_BYTES = 2_000_000
 
 
 def _read_text(path: Path) -> str:
+    """Read ``path`` with its line endings untouched (no CRLF -> LF translation)."""
     try:
-        return path.read_text(encoding="utf-8")
+        with path.open(encoding="utf-8", newline="") as f:
+            return f.read()
     except UnicodeDecodeError as exc:
         raise ToolError(f"'{path.name}' does not look like a text file: {exc}") from exc
+
+
+def _detect_newline(text: str) -> str:
+    return "\r\n" if "\r\n" in text else "\n"
+
+
+def _to_lf(text: str) -> str:
+    return text.replace("\r\n", "\n")
+
+
+def _write_text(path: Path, text: str, newline: str) -> None:
+    """Write ``text`` using ``newline`` for every line ending, regardless of
+    platform - Python's default text mode would turn LF into CRLF on Windows.
+    """
+    data = _to_lf(text)
+    if newline != "\n":
+        data = data.replace("\n", newline)
+    path.write_text(data, encoding="utf-8", newline="")
 
 
 def _unified_diff(old: str, new: str, label: str) -> str:
@@ -52,7 +72,11 @@ def _write_file(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
     content = args["content"]
     display = ctx.sandbox.display_path(path)
 
-    old_content = _read_text(path) if path.exists() else None
+    raw_old = _read_text(path) if path.exists() else None
+    # Keep an existing file's line-ending style; new files get what the model sent.
+    newline = _detect_newline(raw_old if raw_old is not None else content)
+    old_content = _to_lf(raw_old) if raw_old is not None else None
+    content = _to_lf(content)
     if old_content == content:
         return ToolResult(output=f"'{display}' already matches the requested content; no changes made")
 
@@ -62,17 +86,21 @@ def _write_file(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
         return ToolResult(output="user declined the write; file not changed", is_error=True)
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+    _write_text(path, content, newline)
     return ToolResult(output=f"wrote {len(content)} bytes to '{display}'")
 
 
 def _edit_file(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
     path = ctx.sandbox.resolve(args["path"], must_exist=True)
-    old_string = args["old_string"]
-    new_string = args["new_string"]
+    # Match against LF-normalized text so the model's LF-only strings still
+    # find their target in CRLF files; the original endings are restored on write.
+    old_string = _to_lf(args["old_string"])
+    new_string = _to_lf(args["new_string"])
     display = ctx.sandbox.display_path(path)
 
-    content = _read_text(path)
+    raw = _read_text(path)
+    newline = _detect_newline(raw)
+    content = _to_lf(raw)
     count = content.count(old_string)
     if count == 0:
         raise ToolError(f"old_string not found in '{display}' - it must match the file's current contents exactly")
@@ -86,7 +114,7 @@ def _edit_file(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
     if not ctx.confirm(f"Edit {display}", diff):
         return ToolResult(output="user declined the edit; file not changed", is_error=True)
 
-    path.write_text(new_content, encoding="utf-8")
+    _write_text(path, new_content, newline)
     return ToolResult(output=f"applied edit to '{display}'")
 
 

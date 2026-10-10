@@ -86,6 +86,8 @@ class LocoderApp(App):
         self.chat_log.set_mode_name(self.agent.mode.value.capitalize())
         self._refresh_top_bar()
         self._refresh_status_bar()
+        for warning in self.config.warnings:
+            self.chat_log.add_warn(warning)
         self._check_backend()
         self.chat_input.focus()
         self.run_worker(self._index_files, thread=True)
@@ -300,7 +302,10 @@ class LocoderApp(App):
             self._model_warmed_up = False
             self._refresh_top_bar()
             self._refresh_status_bar()
-            self.chat_log.add_system("settings updated and saved to .locoder/config.yaml")
+            self.chat_log.add_system(
+                "settings updated and saved to .locoder/config.yaml "
+                "(yolo applies to this session only - set it in ~/.locoder/config.yaml to keep it)"
+            )
 
         self.run_worker(handle_result())
 
