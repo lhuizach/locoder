@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "locoder"
+version = "0.1.0"
+description = "A local-first CLI coding agent powered by Ollama and other OpenAI-compatible model servers"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "locoder" }]
+dependencies = [
+    "rich>=13.7",
+    "textual>=0.60",
+    "prompt_toolkit>=3.0",
+    "requests>=2.31",
+    "PyYAML>=6.0",
+    "tiktoken>=0.7",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+locoder = "locoder.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["locoder"]

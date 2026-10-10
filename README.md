@@ -1,0 +1,44 @@
+# locoder
+
+A local-first CLI coding agent that talks to [Ollama](https://ollama.com) (or any
+OpenAI-compatible server: llama.cpp, vLLM, LM Studio) as its LLM backend.
+
+## Install
+
+```bash
+pip install -e .
+```
+
+## Quick start
+
+```bash
+ollama pull qwen2.5-coder:latest   # or any tool-calling capable model
+locoder                            # starts an interactive session in the current directory
+locoder --model llama3.1           # override the model for this run
+locoder --yolo                     # skip confirmation prompts for writes/edits/commands
+```
+
+The first run writes a starter config to `.locoder/config.yaml` in the current
+project. Edit it to change the default provider, model, base URL, temperature,
+or context window size.
+
+## Slash commands
+
+- `/help` - list slash commands
+- `/clear` - clear the conversation and start a new session
+- `/model <name>` - switch the active model
+- `/yolo` - toggle confirmation prompts on/off
+- `/tokens` - show approximate context/token usage
+- `/exit`, `/quit` - leave locoder
+
+## Project layout
+
+- `locoder/cli.py` - entry point and REPL
+- `locoder/agent.py` - the core tool-calling loop
+- `locoder/providers/` - model backends (Ollama, OpenAI-compatible)
+- `locoder/tools/` - file, search, and shell command tools
+- `locoder/config.py` - config file loading
+- `locoder/ui.py` - rich-based terminal rendering
+- `locoder/context.py` - token accounting and history compaction
+- `locoder/session.py` - per-project `.locoder/` session persistence
+- `locoder/sandbox.py` - path containment for file tools

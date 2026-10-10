@@ -1,0 +1,191 @@
+Screen {
+    layout: vertical;
+    background: #0d0d0d;
+}
+
+#body {
+    height: 1fr;
+}
+
+#main-column {
+    width: 1fr;
+    height: 100%;
+}
+
+#sidebar {
+    width: 32;
+    height: 100%;
+    background: #141414;
+    border-left: solid #2a2a2a;
+    padding: 1 2;
+    color: #a0a0a0;
+}
+
+ChatLog {
+    height: 1fr;
+    padding: 0 2;
+    background: #0d0d0d;
+}
+
+.msg-user {
+    border-left: thick #e0954f;
+    padding: 0 0 0 1;
+    margin-top: 1;
+    color: #f0f0f0;
+    text-style: bold;
+}
+
+.msg-header {
+    margin-top: 1;
+}
+
+.msg-thought {
+    margin-top: 1;
+}
+
+.msg-assistant {
+    color: #e8e8e8;
+}
+
+.msg-footer {
+    color: #666666;
+    margin-bottom: 1;
+}
+
+.msg-tool {
+    padding-left: 2;
+    color: #808080;
+}
+
+.msg-status {
+    padding-left: 0;
+}
+
+#slash-popup, #file-popup {
+    height: auto;
+    max-height: 10;
+    display: none;
+    border: solid #e0954f;
+    background: #141414;
+    margin: 0 2;
+}
+
+TopBar {
+    height: 1;
+    padding: 0 2;
+    background: #0d0d0d;
+    color: #808080;
+}
+
+ChatInput {
+    margin: 1 2 1 2;
+    padding: 1 2;
+    border: none;
+    border-left: thick #e0954f;
+    background: #141414;
+    color: #f0f0f0;
+}
+ChatInput:focus {
+    border: none;
+    border-left: thick #e0954f;
+}
+
+StatusBar {
+    height: 1;
+    dock: bottom;
+    padding: 0 2;
+    background: #141414;
+    color: #808080;
+}
+
+ConfirmModal {
+    align: center middle;
+}
+#confirm-box {
+    width: 90%;
+    height: auto;
+    max-height: 80%;
+    border: solid #e0954f;
+    background: #141414;
+    padding: 1 2;
+}
+#confirm-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+#confirm-preview-box {
+    height: auto;
+    max-height: 20;
+    border: solid #2a2a2a;
+    padding: 0 1;
+}
+#confirm-buttons {
+    height: auto;
+    margin-top: 1;
+    align: right middle;
+}
+#confirm-buttons Button {
+    margin-left: 1;
+}
+
+SelectModal {
+    align: center middle;
+}
+#select-box {
+    width: 80%;
+    height: 80%;
+    border: solid #e0954f;
+    background: #141414;
+    padding: 1 2;
+}
+#select-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+#select-list {
+    height: 1fr;
+    margin-top: 1;
+}
+
+SettingsModal {
+    align: center middle;
+}
+#settings-box {
+    width: 70;
+    height: auto;
+    border: solid #e0954f;
+    background: #141414;
+    padding: 1 2;
+}
+#settings-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+.settings-row {
+    height: auto;
+    align: left middle;
+    margin-top: 1;
+}
+.settings-row Label {
+    width: 1fr;
+}
+#settings-buttons {
+    height: auto;
+    margin-top: 1;
+    align: right middle;
+}
+#settings-buttons Button {
+    margin-left: 1;
+}
+
+HelpModal {
+    align: center middle;
+}
+#help-box {
+    width: 80%;
+    height: auto;
+    max-height: 80%;
+    border: solid #e0954f;
+    background: #141414;
+    padding: 1 2;
+}

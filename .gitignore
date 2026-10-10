@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.locoder/
+.pytest_cache/
+*.log
+troll_dashboard/cloudflared.exe
