@@ -5,8 +5,11 @@ text answer.
 
 from __future__ import annotations
 
+import json
+import sys
 import threading
 from enum import Enum
+from pathlib import Path
 from typing import Optional
 
 from locoder.context import ContextManager
@@ -37,6 +40,35 @@ declines, stop and ask how they'd like to proceed instead of retrying blindly.
 """
 
 MAX_TOOL_ITERATIONS = 25
+
+# Small models tend to retry a failing call verbatim. The second identical
+# failure gets a note appended; the third ends the turn.
+MAX_IDENTICAL_FAILURES = 3
+REPEATED_FAILURE_NOTE = (
+    "\n\n[locoder] This exact call already failed the same way earlier in this turn. "
+    "Don't repeat it: read the error above, change the command or arguments, or ask the user."
+)
+
+# Sent (transiently, never saved) when the model ends a turn with neither text
+# nor tool calls - e.g. it only "thought" - so the user still gets an answer.
+EMPTY_REPLY_NUDGE = (
+    "You ended your turn without replying. In a few sentences, tell the user what you did "
+    "and the result (or what's still left to do)."
+)
+
+
+def environment_note(root: Path) -> str:
+    if sys.platform == "win32":
+        shell = "Windows; run_command uses cmd.exe, so use cmd syntax (e.g. `dir`, `type`)"
+    else:
+        shell = f"{sys.platform}; run_command uses /bin/sh"
+    return (
+        "Environment:\n"
+        f"- Project root: {root}\n"
+        "- Shell commands already run in the project root - don't cd anywhere first. "
+        "All paths (for tools and commands) are relative to it, e.g. `python -m pytest tests`.\n"
+        f"- OS: {shell}"
+    )
 
 
 class AgentMode(str, Enum):
@@ -139,9 +171,10 @@ class Agent:
         system messages anywhere but first.
         """
         system_parts = [m.content.strip() for m in self.messages if m.role == "system"]
+        system_parts.insert(1, environment_note(self.sandbox.root))
         instructions = MODE_INSTRUCTIONS.get(self.mode)
         if instructions:
-            system_parts.insert(1, instructions.strip())
+            system_parts.insert(2, instructions.strip())
         rest = [m for m in self.messages if m.role != "system"]
         return [Message(role="system", content="\n\n".join(system_parts)), *rest]
 
@@ -149,6 +182,9 @@ class Agent:
         self._cancel_requested.clear()
         self.messages.append(Message(role="user", content=user_input))
         compaction_tried = False
+        nudged = False
+        extra: list[Message] = []
+        failures: dict[str, int] = {}
 
         for _ in range(MAX_TOOL_ITERATIONS):
             if self._cancel_requested.is_set():
@@ -166,7 +202,8 @@ class Agent:
                 if self.ctx_manager.should_compact(self.messages):
                     self.ui.warn("context is still nearly full after summarizing - consider /clear")
 
-            final_message, error, interrupted = self._stream_completion()
+            final_message, error, interrupted = self._stream_completion(extra)
+            extra = []
             if interrupted:
                 self.session.save(self.messages)
                 return
@@ -177,12 +214,20 @@ class Agent:
                 self.ui.error("model returned an empty response")
                 return
 
+            if not final_message.tool_calls and not final_message.content.strip():
+                if not nudged:
+                    nudged = True
+                    extra = [Message(role="user", content=EMPTY_REPLY_NUDGE)]
+                    continue
+                self.ui.warn("the model ended its turn without a reply")
+
             self.messages.append(final_message)
 
             if not final_message.tool_calls:
                 self.session.save(self.messages)
                 return
 
+            stuck = False
             for tool_call in final_message.tool_calls:
                 self.ui.tool_call(tool_call.name, tool_call.arguments)
                 if self.mode != AgentMode.BUILD and tool_call.name not in READ_ONLY_TOOLS:
@@ -195,6 +240,13 @@ class Agent:
                     )
                 else:
                     result = tools_registry.dispatch(tool_call.name, tool_call.arguments, self.tool_ctx)
+                if result.is_error:
+                    key = json.dumps([tool_call.name, tool_call.arguments], sort_keys=True, default=str)
+                    key += "\0" + result.output
+                    failures[key] = failures.get(key, 0) + 1
+                    if failures[key] >= 2:
+                        result.output += REPEATED_FAILURE_NOTE
+                    stuck = stuck or failures[key] >= MAX_IDENTICAL_FAILURES
                 self.ui.tool_result(tool_call.name, result)
                 self.messages.append(
                     Message(
@@ -207,16 +259,27 @@ class Agent:
 
             self.session.save(self.messages)
 
+            if stuck:
+                self.ui.warn(
+                    f"stopped: the model repeated the same failing tool call {MAX_IDENTICAL_FAILURES} times "
+                    "- try rephrasing your request or giving it a hint"
+                )
+                return
+
         self.ui.warn(
             f"stopped after {MAX_TOOL_ITERATIONS} tool-call iterations in this turn "
             "(possible loop) - try rephrasing your request"
         )
         self.session.save(self.messages)
 
-    def _stream_completion(self) -> tuple[Optional[Message], Optional[BaseException], bool]:
+    def _stream_completion(
+        self, extra: Optional[list[Message]] = None
+    ) -> tuple[Optional[Message], Optional[BaseException], bool]:
+        """``extra`` messages are sent along for this one call but not kept in history."""
         final_message: Optional[Message] = None
         error: Optional[BaseException] = None
-        gen = self.provider.chat(self._effective_messages(), tools=self._tool_schemas(), stream=True)
+        messages = self._effective_messages() + list(extra or [])
+        gen = self.provider.chat(messages, tools=self._tool_schemas(), stream=True)
         try:
             for event in gen:
                 if self._cancel_requested.is_set():
