@@ -77,6 +77,28 @@ def test_large_tool_output_is_capped(ctx, tmp_path: Path):
     assert "start_line/end_line" in result.output
 
 
+def test_missing_file_error_suggests_matching_paths(ctx, tmp_path: Path):
+    (tmp_path / "pkg" / "sub").mkdir(parents=True)
+    (tmp_path / "pkg" / "sub" / "Sandbox.py").write_text("x\n", encoding="utf-8")
+    (tmp_path / ".venv").mkdir()
+    (tmp_path / ".venv" / "sandbox.py").write_text("x\n", encoding="utf-8")
+
+    result = registry.dispatch("read_file", {"path": "sandbox.py"}, ctx)
+
+    assert result.is_error
+    assert "Did you mean: pkg/sub/Sandbox.py?" in result.output
+    assert ".venv" not in result.output
+
+
+def test_paths_are_shown_with_forward_slashes(ctx, tmp_path: Path):
+    (tmp_path / "a" / "b").mkdir(parents=True)
+    (tmp_path / "a" / "b" / "c.txt").write_text("needle\n", encoding="utf-8")
+
+    result = registry.dispatch("search_files", {"pattern": "needle"}, ctx)
+
+    assert "a/b/c.txt:1:needle" in result.output
+
+
 def test_sandbox_blocks_paths_outside_root(ctx, tmp_path: Path):
     result = registry.dispatch("read_file", {"path": "../outside.txt"}, ctx)
 

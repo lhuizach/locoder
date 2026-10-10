@@ -10,11 +10,11 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from locoder.sandbox import IGNORED_DIRS  # noqa: F401 - also re-exported for tui.commands
 from locoder.tools.base import Tool, ToolContext, ToolError, ToolResult, register
 
 MAX_MATCHES = 200
 MAX_LINE_CHARS = 300  # minified/generated files can have megabyte-long lines
-IGNORED_DIRS = {".git", ".locoder", "__pycache__", "node_modules", ".venv", "venv", ".mypy_cache"}
 
 
 def _search_files(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
@@ -41,6 +41,8 @@ def _search_with_ripgrep(rg: str, pattern: str, search_root: Path, ctx: ToolCont
         "--max-columns",
         str(MAX_LINE_CHARS),
         "--max-columns-preview",
+        "--path-separator",
+        "/",
         # -e/-- so patterns or paths starting with "-" aren't parsed as flags
         "-e",
         pattern,
