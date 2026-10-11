@@ -35,7 +35,7 @@ def _short(value: Any, limit: int = 60) -> str:
 
 
 class TopBar(Static):
-    """A compact one-line model/mode reminder, docked just above the input."""
+    """The mode/model line under the input, e.g. "Build · qwen3.5:4b ollama"."""
 
     def set_info(
         self,
@@ -48,8 +48,16 @@ class TopBar(Static):
         mode_name: str,
         accent: str = ACCENT,
     ) -> None:
-        confirm_mode = f"[bold {accent}]yolo[/]" if yolo else "confirm"
-        self.update(f"[bold {accent}]{mode_name}[/]  [{accent}]{provider}:{model}[/]  [dim]- {confirm_mode}[/]")
+        line = Text.assemble(
+            (mode_name, accent),
+            (SEP, "#555555"),
+            (model, "bold #e8e8e8"),
+            " ",
+            (provider, "#808080"),
+        )
+        if yolo:
+            line.append_text(Text.assemble((SEP, "#555555"), ("yolo", f"bold {accent}")))
+        self.update(line)
 
 
 class StatusBar(Static):

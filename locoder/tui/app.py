@@ -8,7 +8,8 @@ from pathlib import Path
 
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widgets import OptionList
+from rich.text import Text
+from textual.widgets import OptionList, Static
 
 from locoder.agent import MODE_COLORS, MODE_ORDER, Agent
 from locoder.config import AppConfig
@@ -21,6 +22,7 @@ from locoder.tui.chat_input import ChatInput
 from locoder.tui.commands import build_file_index, expand_file_mentions, find_command
 from locoder.tui.modals import ConfirmModal, HelpModal, SelectModal, SettingsModal, conversation_options
 from locoder.tui.tui_ui import TuiUI
+from locoder.tui.home import HomeFooter, HomeLogo
 from locoder.tui.widgets import ChatLog, Sidebar, StatusBar, TopBar
 
 CSS_PATH = str(Path(__file__).parent / "app.tcss")
@@ -59,22 +61,28 @@ class LocoderApp(App):
         self.agent.tool_ctx.notify = self.tui_ui.notice
         self._busy = False
         self._model_warmed_up = False
+        self._home = False
+        self._home_notes: list[Text] = []
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="body"):
             with Vertical(id="main-column"):
+                yield HomeLogo(id="home-logo")
                 yield ChatLog(id="chatlog")
                 yield OptionList(id="slash-popup")
                 yield OptionList(id="file-popup")
-                yield TopBar(id="topbar")
-                yield ChatInput(
-                    history_file=self.session.locoder_dir / "tui_history",
-                    file_index=[],
-                    id="chat-input",
-                    placeholder="Type a message - / for commands, @ to mention a file",
-                )
+                with Vertical(id="prompt-box"):
+                    yield ChatInput(
+                        history_file=self.session.locoder_dir / "tui_history",
+                        file_index=[],
+                        id="chat-input",
+                        placeholder='Ask anything... "fix the failing tests"',
+                    )
+                    yield TopBar(id="topbar")
+                yield Static(id="home-notice")
             yield Sidebar(id="sidebar")
         yield StatusBar(id="statusbar")
+        yield HomeFooter(id="home-footer")
 
     @property
     def chat_log(self) -> ChatLog:
@@ -101,8 +109,10 @@ class LocoderApp(App):
         self.chat_log.set_mode_name(self.agent.mode.value.capitalize())
         self._refresh_top_bar()
         self._refresh_status_bar()
+        self.query_one(HomeFooter).show(self.project_root)
+        self._show_home(True)
         for warning in self.config.warnings:
-            self.chat_log.add_warn(warning)
+            self._warn(warning)
         self._check_backend()
         self.chat_input.focus()
         self.run_worker(self._index_files, thread=True)
@@ -132,7 +142,7 @@ class LocoderApp(App):
         )
         self.chat_log.set_accent(accent)
         self.status_bar.set_accent(accent)
-        self.chat_input.styles.border_left = ("thick", accent)
+        self.query_one("#prompt-box").styles.border_left = ("thick", accent)
         self.query_one("#slash-popup").styles.border = ("solid", accent)
         self.query_one("#file-popup").styles.border = ("solid", accent)
 
@@ -141,13 +151,43 @@ class LocoderApp(App):
         self.status_bar.set_usage(used=used, limit=limit)
         self.sidebar.set_usage(used=used, limit=limit)
 
+    # -- home screen --------------------------------------------------------------
+
+    def _show_home(self, on: bool) -> None:
+        """The home screen is shown while the conversation is empty."""
+        self._home = on
+        self._home_notes = []
+        self.query_one("#home-notice", Static).update("")
+        self.screen.set_class(on, "home")
+        self.chat_input.focus()
+
+    def on_resize(self, event) -> None:  # noqa: ANN001 - events.Resize
+        # Short terminal: the wordmark alone still fits above the box.
+        for logo in self.query(HomeLogo):
+            logo.set_compact(event.size.height < 32)
+
+    def _say(self, kind: str, msg: str) -> None:
+        """A status line: into the transcript, or under the box on the home screen."""
+        if not self._home:
+            getattr(self.chat_log, f"add_{kind}")(msg)
+            return
+        if kind == "system" and msg.startswith("mode: "):
+            return  # the box already shows the mode
+        style = {"warn": "yellow", "error": "bold red", "info": "dim"}.get(kind, "#808080")
+        prefix = {"warn": "warning: ", "error": "error: "}.get(kind, "")
+        self._home_notes = (self._home_notes + [Text(prefix + msg, style=style)])[-3:]
+        self.query_one("#home-notice", Static).update(Text("\n").join(self._home_notes))
+
+    def _warn(self, msg: str) -> None:
+        self._say("warn", msg)
+
     def _check_backend(self) -> None:
         def worker() -> None:
             try:
                 self.agent.provider.list_models()
             except ProviderError as exc:
                 self.call_from_thread(
-                    self.chat_log.add_warn,
+                    self._warn,
                     f"could not reach the model backend yet ({exc}); will retry when you send a message",
                 )
 
@@ -178,7 +218,7 @@ class LocoderApp(App):
     def on_chat_input_interrupt_requested(self, message: ChatInput.InterruptRequested) -> None:
         if self._busy:
             self.agent.request_cancel()
-            self.chat_log.add_warn("interrupt requested - stopping...")
+            self._say("warn", "interrupt requested - stopping...")
         else:
             self.chat_input.value = ""
 
@@ -189,7 +229,7 @@ class LocoderApp(App):
         mode_name = new_mode.value.capitalize()
         self.chat_log.set_mode_name(mode_name)
         self._refresh_top_bar()
-        self.chat_log.add_system(f"mode: {mode_name}")
+        self._say("system", f"mode: {mode_name}")
 
     def _dispatch_command_text(self, text: str) -> None:
         parts = text[1:].split(maxsplit=1)
@@ -200,7 +240,7 @@ class LocoderApp(App):
     def _dispatch_command(self, name: str, arg: str) -> None:
         command = find_command(name)
         if command is None:
-            self.chat_log.add_warn(f"unknown command: /{name} (try /help)")
+            self._say("warn", f"unknown command: /{name} (try /help)")
             return
 
         if command.name == "help":
@@ -208,7 +248,7 @@ class LocoderApp(App):
         elif command.name == "clear":
             self.agent.clear()
             self.chat_log.remove_children()
-            self.chat_log.add_system("conversation cleared; started a new session")
+            self._show_home(True)
             self._refresh_status_bar()
         elif command.name == "model":
             if arg:
@@ -222,18 +262,19 @@ class LocoderApp(App):
         elif command.name == "yolo":
             self.agent.set_yolo(not self.agent.yolo)
             self._refresh_top_bar()
-            self.chat_log.add_system(f"yolo mode {'enabled' if self.agent.yolo else 'disabled'}")
+            self._say("system", f"yolo mode {'enabled' if self.agent.yolo else 'disabled'}")
         elif command.name == "tokens":
             used, limit = self.agent.token_usage()
-            self.chat_log.add_system(f"context usage: ~{used:,} / {limit:,} tokens")
+            self._say("system", f"context usage: ~{used:,} / {limit:,} tokens")
         elif command.name == "exit":
             self.exit()
 
     def _send_user_message(self, text: str) -> None:
         if self._busy:
-            self.chat_log.add_warn("still working on the previous message - please wait (esc to cancel it)")
+            self._say("warn", "still working on the previous message - please wait (esc to cancel it)")
             return
         self._busy = True
+        self._show_home(False)
         label = "loading model..." if not self._model_warmed_up else "thinking..."
         self.status_bar.set_busy(True, label)
         self.chat_log.add_user_message(text)
@@ -264,13 +305,13 @@ class LocoderApp(App):
     # -- model picker -----------------------------------------------------------
 
     def _open_model_picker(self) -> None:
-        self.chat_log.add_info("loading models...")
+        self._say("info", "loading models...")
 
         def worker() -> None:
             try:
                 models = self.agent.provider.list_models()
             except ProviderError as exc:
-                self.call_from_thread(self.chat_log.add_error, f"could not list models: {exc}")
+                self.call_from_thread(self._say, "error", f"could not list models: {exc}")
                 return
             self.call_from_thread(self._show_model_picker, models)
 
@@ -294,7 +335,7 @@ class LocoderApp(App):
         self.chat_log.set_model_name(model_name)
         self._model_warmed_up = False
         self._refresh_top_bar()
-        self.chat_log.add_system(f"switched model to '{model_name}'")
+        self._say("system", f"switched model to '{model_name}'")
 
     # -- settings ---------------------------------------------------------------
 
@@ -306,7 +347,7 @@ class LocoderApp(App):
             try:
                 new_provider = create_provider(**new_config.provider_kwargs())
             except ValueError as exc:
-                self.chat_log.add_error(str(exc))
+                self._say("error", str(exc))
                 return
             self.config = new_config
             self.agent.set_provider(new_provider)
@@ -319,7 +360,7 @@ class LocoderApp(App):
             self._model_warmed_up = False
             self._refresh_top_bar()
             self._refresh_status_bar()
-            self.chat_log.add_system(
+            self._say("system", 
                 "settings updated and saved to .locoder/config.yaml "
                 "(yolo applies to this session only - set it in ~/.locoder/config.yaml to keep it)"
             )
@@ -365,6 +406,7 @@ class LocoderApp(App):
         messages = self.session.resume(path)
         self.agent.messages = messages
         self.chat_log.remove_children()
+        self._show_home(False)
         self._replay(messages)
-        self.chat_log.add_system(f"resumed conversation from {path.name}")
+        self._say("system", f"resumed conversation from {path.name}")
         self._refresh_status_bar()
