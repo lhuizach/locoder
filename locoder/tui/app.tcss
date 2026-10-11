@@ -36,6 +36,11 @@ Screen {
     color: $secondary;
 }
 
+/* Ctrl+B / sidebar collapses it; the transcript takes the full width. */
+Screen.sidebar-hidden #sidebar {
+    display: none;
+}
+
 /* -- transcript ---------------------------------------------------------- */
 
 ChatLog {

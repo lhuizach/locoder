@@ -23,8 +23,29 @@ OK = "#5fb85f"
 WARN = "#d7a84a"
 ERROR = "#e5534b"
 
-# The logo's silhouette in one character: a bar across the top, an arm down the right.
-MARK = "▜"
+# The logo's silhouette in two characters: a bar across the top ("▀" is half
+# a cell tall) and an arm down the right ("█" is a full cell wide). Terminal
+# cells are twice as tall as they are wide, so both strokes come out equally
+# thick - a single "▜" would make the bar twice as thick as the arm.
+MARK = "▀█"
+
+# The loading animation: a three-square snake running clockwise around a
+# 4 x 2 loop of quarter-cell squares, drawn two characters wide.
+_SNAKE_PATH = [(0, 0), (1, 0), (2, 0), (3, 0), (3, 1), (2, 1), (1, 1), (0, 1)]
+_SNAKE_LENGTH = 3
+# Quarter blocks indexed by bits: 1 top-left, 2 top-right, 4 bottom-left, 8 bottom-right.
+_QUADRANTS = " ▘▝▀▖▌▞▛▗▚▐▜▄▙▟█"
+SNAKE_FRAMES = len(_SNAKE_PATH)
+
+
+def snake_frame(i: int) -> str:
+    """Frame ``i`` of the loading animation (wraps around)."""
+    cells = [0, 0]
+    head = i % len(_SNAKE_PATH)
+    for k in range(_SNAKE_LENGTH):
+        x, y = _SNAKE_PATH[(head - k) % len(_SNAKE_PATH)]
+        cells[x // 2] |= 1 << (y * 2 + x % 2)
+    return _QUADRANTS[cells[0]] + _QUADRANTS[cells[1]]
 
 
 def _short(value: Any, limit: int = 60) -> str:

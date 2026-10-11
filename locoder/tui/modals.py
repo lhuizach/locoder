@@ -273,6 +273,7 @@ class HelpModal(ModalScreen[None]):
             ("↑ ↓", "move in the open menu, or through your message history"),
             ("tab", "accept the menu item - or, with no menu open, switch mode"),
             ("esc", "close a menu, or stop the current answer"),
+            ("ctrl+b", "show or hide the sidebar"),
         ]:
             keys.add_row(Text(key, style=FG), Text(what, style=SECONDARY))
 

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from rich.text import Text
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.color import Color
 from textual.containers import Horizontal, Vertical
 from textual.widgets import OptionList, Static
@@ -45,6 +46,7 @@ def _looks_failed(output: str) -> bool:
 
 class LocoderApp(App):
     CSS_PATH = CSS_PATH
+    BINDINGS = [Binding("ctrl+b", "toggle_sidebar", "toggle sidebar", show=False)]
     TITLE = "locoder"
 
     def __init__(self, agent: Agent, session: SessionStore, config: AppConfig, project_root: Path) -> None:
@@ -166,6 +168,14 @@ class LocoderApp(App):
         self.screen.set_class(on, "home")
         self.chat_input.focus()
 
+    def action_toggle_sidebar(self) -> None:
+        """Ctrl+B or /sidebar. A class on the screen, so the home screen
+        (which never shows the sidebar) keeps hiding it either way.
+        """
+        hidden = not self.screen.has_class("sidebar-hidden")
+        self.screen.set_class(hidden, "sidebar-hidden")
+        self.status_bar.set_sidebar_hidden(hidden)
+
     def _render_home_notice(self) -> None:
         """Under the box: where the model runs, then any recent status lines."""
         lines = [where_it_runs(self.agent.provider.base_url), *self._home_notes]
@@ -268,6 +278,8 @@ class LocoderApp(App):
             self.agent.set_yolo(not self.agent.yolo)
             self._refresh_mode_display()
             self._say("system", f"yolo mode {'enabled' if self.agent.yolo else 'disabled'}")
+        elif command.name == "sidebar":
+            self.action_toggle_sidebar()
         elif command.name == "tokens":
             used, limit = self.agent.token_usage()
             self._say("system", f"context usage: ~{used:,} / {limit:,} tokens")

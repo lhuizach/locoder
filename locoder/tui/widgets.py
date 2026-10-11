@@ -32,6 +32,7 @@ from locoder.display import (
     SEP,
     TOOL_VERBS,
     context_bar,
+    snake_frame,
     tool_summary,
     tool_target,
     usage_color,
@@ -39,11 +40,8 @@ from locoder.display import (
 from locoder.tools.base import ToolResult
 
 MAX_TOOL_RESULT_PREVIEW = 2_000
-# ASCII-only: non-ASCII glyphs (braille spinners, etc.) have crashed on
-# Windows' legacy cp1252 console encoding elsewhere in this project - keep
-# every rendered frame safe for that codec.
-THINKING_FRAMES = ["|", "/", "-", "\\"]
-SPINNER_INTERVAL = 1 / 6
+# The loading animation (display.snake_frame) advances this often.
+SPINNER_INTERVAL = 1 / 8
 ACCENT = "#4a9eff"
 
 
@@ -66,6 +64,7 @@ class StatusBar(Static):
         self._spinner_frame = 0
         self._busy_label = "thinking..."
         self._accent = ACCENT
+        self._sidebar_hidden = False
 
     def set_accent(self, accent: str) -> None:
         self._accent = accent
@@ -79,22 +78,29 @@ class StatusBar(Static):
         self._used, self._limit = used, limit
         self._redraw()
 
+    def set_sidebar_hidden(self, hidden: bool) -> None:
+        """While the sidebar is collapsed, say how to bring it back."""
+        self._sidebar_hidden = hidden
+        self._redraw()
+
     def set_busy(self, busy: bool, label: str = "thinking...") -> None:
         if busy:
             self._busy_label = label
             if self._spinner_timer is None:
                 self._spinner_frame = 0
-                self._spinner_timer = self.set_interval(SPINNER_INTERVAL, self._redraw)
+                self._spinner_timer = self.set_interval(SPINNER_INTERVAL, self._tick_spinner)
         elif self._spinner_timer is not None:
             self._spinner_timer.stop()
             self._spinner_timer = None
         self._redraw()
 
+    def _tick_spinner(self) -> None:
+        self._spinner_frame += 1
+        self._redraw()
+
     def _redraw(self) -> None:
         if self._spinner_timer is not None:
-            frame = THINKING_FRAMES[self._spinner_frame % len(THINKING_FRAMES)]
-            self._spinner_frame += 1
-            # Text, not markup: a "/" or "\" frame would be parsed as a closing tag.
+            frame = snake_frame(self._spinner_frame)
             left = Text.assemble((frame, self._accent), " ", (self._busy_label, SECONDARY),
                                  (SEP + "esc to cancel", MUTED))
         else:
@@ -104,6 +110,8 @@ class StatusBar(Static):
             (filled, usage_color(frac, self._accent)), (empty, FAINT),
             (f"  {frac * 100:.0f}%", SECONDARY), (f"{SEP}{self._used:,} tokens", MUTED),
         )
+        if self._sidebar_hidden:
+            right.append_text(Text.assemble((SEP, MUTED), ("ctrl+b", SECONDARY), (" sidebar", MUTED)))
         grid = Table.grid(expand=True)
         grid.add_column(justify="left", no_wrap=True, overflow="ellipsis")
         grid.add_column(justify="right", no_wrap=True)
@@ -162,7 +170,8 @@ class Sidebar(Static):
             Text.assemble((filled, usage_color(frac, self._accent)), (empty, FAINT)),
             Text.assemble((f"{self._used:,}", FG), (f" / {self._limit:,}", MUTED), (f"{SEP}{frac * 100:.0f}%", SECONDARY)),
             Text(""),
-            Text.assemble(("/help", SECONDARY), ("  commands", MUTED)),
+            Text.assemble(("/help", SECONDARY), ("   commands", MUTED)),
+            Text.assemble(("ctrl+b", SECONDARY), ("  hide sidebar", MUTED)),
         ]
         self.update(Group(*blocks))
 
@@ -385,10 +394,10 @@ class ChatLog(VerticalScroll):
     def _tick_live(self) -> None:
         if self._live is None or not self._live.display:
             return
-        frame = THINKING_FRAMES[self._live_frame % len(THINKING_FRAMES)]
+        frame = snake_frame(self._live_frame)
         self._live_frame += 1
         elapsed = time.monotonic() - self._live_since
-        self._live.update(Text(f"{frame} {self._live_label} {elapsed:.0f}s", style="dim italic"))
+        self._live.update(Text.assemble((frame, self._accent), " ", (f"{self._live_label} {elapsed:.0f}s", "dim italic")))
 
     # -- the agent's UI calls (via TuiUI) ------------------------------------
 
