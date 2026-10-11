@@ -35,30 +35,58 @@ ChatLog {
     text-style: bold;
 }
 
-.msg-header {
+/* One assistant turn: header, collapsed thought, tool lines, text, footer.
+   Everything inside a turn is indented under the "locoder" header. */
+.turn-header {
     margin-top: 1;
 }
 
-.msg-thought {
-    margin-top: 1;
+.turn-thought {
+    padding-left: 2;
+    color: #6a6a6a;
+}
+.turn-thought:hover {
+    color: #a0a0a0;
+    background: #161616;
 }
 
-.msg-assistant {
+.turn-tool {
+    padding-left: 2;
+    color: #9a9a9a;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+}
+.turn-tool.expanded {
+    text-wrap: wrap;
+}
+.turn-tool:hover {
+    background: #161616;
+}
+
+.turn-text {
+    padding-left: 2;
+    margin: 1 0;
     color: #e8e8e8;
 }
+.turn-text.narration {
+    margin: 0;
+    color: #7a7a7a;
+}
 
-.msg-footer {
+.turn-live {
+    padding-left: 2;
+    margin-bottom: 1;
     color: #666666;
+}
+
+.turn-footer {
+    padding-left: 2;
+    color: #505050;
     margin-bottom: 1;
 }
 
-.msg-tool {
-    padding-left: 2;
-    color: #808080;
-}
-
 .msg-status {
-    padding-left: 0;
+    padding-left: 2;
 }
 
 #slash-popup, #file-popup {

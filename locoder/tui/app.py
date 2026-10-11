@@ -13,9 +13,10 @@ from textual.widgets import OptionList
 from locoder.agent import MODE_COLORS, MODE_ORDER, Agent
 from locoder.config import AppConfig
 from locoder.context import ContextManager
-from locoder.providers.base import ProviderError
+from locoder.providers.base import Message, ProviderError
 from locoder.providers.registry import create_provider
 from locoder.session import SessionStore
+from locoder.tools.base import ToolResult
 from locoder.tui.chat_input import ChatInput
 from locoder.tui.commands import build_file_index, expand_file_mentions, find_command
 from locoder.tui.modals import ConfirmModal, HelpModal, SelectModal, SettingsModal, conversation_options
@@ -23,6 +24,20 @@ from locoder.tui.tui_ui import TuiUI
 from locoder.tui.widgets import ChatLog, Sidebar, StatusBar, TopBar
 
 CSS_PATH = str(Path(__file__).parent / "app.tcss")
+ATTACHED_FILE_MARKER = "\n\n### Attached file: "
+
+# Saved tool messages don't record success/failure; these openings are how
+# the tools and dispatcher phrase failures.
+_FAILURE_PREFIXES = (
+    "not found:", "permission denied:", "unexpected error", "unknown tool", "user declined",
+    "old_string", "command timed out", "search timed out", "ripgrep failed", "invalid regex",
+)
+
+
+def _looks_failed(output: str) -> bool:
+    if output.startswith("exit code: "):
+        return not output.startswith("exit code: 0\n") and output.strip() != "exit code: 0"
+    return output.startswith(_FAILURE_PREFIXES) or "outside the sandbox root" in output
 
 
 class LocoderApp(App):
@@ -41,7 +56,7 @@ class LocoderApp(App):
         # which reads self.ui dynamically and already handles the yolo
         # short-circuit - overwriting it here directly would bypass yolo.
         self.agent.ui = self.tui_ui
-        self.agent.tool_ctx.notify = self.tui_ui.info
+        self.agent.tool_ctx.notify = self.tui_ui.notice
         self._busy = False
         self._model_warmed_up = False
 
@@ -219,10 +234,10 @@ class LocoderApp(App):
             self.chat_log.add_warn("still working on the previous message - please wait (esc to cancel it)")
             return
         self._busy = True
-        label = "initializing..." if not self._model_warmed_up else "thinking..."
+        label = "loading model..." if not self._model_warmed_up else "thinking..."
         self.status_bar.set_busy(True, label)
         self.chat_log.add_user_message(text)
-        self.chat_log.start_thinking(label)
+        self.chat_log.start_thinking("Loading model" if not self._model_warmed_up else "Thinking")
         expanded = expand_file_mentions(text, self.agent.sandbox)
         self.run_worker(lambda: self._run_turn(expanded), thread=True, exclusive=True, group="agent-turn")
 
@@ -233,6 +248,8 @@ class LocoderApp(App):
             self.call_from_thread(self._on_turn_done)
 
     def _on_turn_done(self) -> None:
+        self.chat_log.set_model_name(self.agent.provider.model)
+        self.chat_log.finish_turn()
         self._busy = False
         self._model_warmed_up = True
         self.status_bar.set_busy(False)
@@ -324,14 +341,30 @@ class LocoderApp(App):
 
         self.run_worker(handle_result())
 
+    def _replay(self, messages: list[Message]) -> None:
+        """Redraw a saved conversation in the same compact turn layout as a
+        live one: tool calls as single lines, narration dimmed, answer last.
+        """
+        results = {m.tool_call_id: m.content for m in messages if m.role == "tool" and m.tool_call_id}
+        log = self.chat_log
+        for i, m in enumerate(messages):
+            if m.role == "user":
+                log.finish_turn(footer="")
+                # Hide the file contents an @mention attached.
+                log.add_user_message(m.content.split(ATTACHED_FILE_MARKER, 1)[0])
+            elif m.role == "assistant":
+                if m.content.strip():
+                    log.replay_text(m.content, narration=bool(m.tool_calls))
+                for tc in m.tool_calls:
+                    output = results.get(tc.id)
+                    result = None if output is None else ToolResult(output=output, is_error=_looks_failed(output))
+                    log.replay_tool(tc.name, tc.arguments, result)
+        log.finish_turn(footer="")
+
     def _resume_conversation(self, path: Path) -> None:
         messages = self.session.resume(path)
         self.agent.messages = messages
         self.chat_log.remove_children()
-        for m in messages:
-            if m.role == "user":
-                self.chat_log.add_user_message(m.content)
-            elif m.role == "assistant" and m.content:
-                self.chat_log.replay_assistant_message(m.content)
+        self._replay(messages)
         self.chat_log.add_system(f"resumed conversation from {path.name}")
         self._refresh_status_bar()

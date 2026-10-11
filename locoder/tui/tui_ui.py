@@ -54,6 +54,10 @@ class TuiUI:
     def info(self, msg: str) -> None:
         self.app.call_from_thread(self.app.chat_log.add_info, msg)
 
+    def notice(self, msg: str) -> None:
+        """For tool notifications, which can repeat on every call."""
+        self.app.call_from_thread(self.app.chat_log.add_notice, msg)
+
     def warn(self, msg: str) -> None:
         self.app.call_from_thread(self.app.chat_log.add_warn, msg)
 
