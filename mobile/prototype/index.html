@@ -11,6 +11,15 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:wght@400..800&display=swap">
 <style>
+  /* Bundled copy (fonts/, with its OFL licence) so the app works offline;
+     the Google Fonts link above covers the file opened on its own. */
+  @font-face {
+    font-family: "Google Sans Flex";
+    src: url("fonts/GoogleSansFlex-latin.woff2") format("woff2");
+    font-weight: 400 800;
+    font-display: swap;
+  }
+
   /* Same palette as the CLI (locoder/display.py). --accent is the mode colour. */
   :root {
     --bg: #0d0d0d;
@@ -954,6 +963,22 @@ $("#unpairBtn").addEventListener("click", () => dialog({
 
 setMode("build");
 renderList();
+
+/* The Android back button (called by the app's WebView). Returns true if
+   it handled it, false to let the app close. */
+window.onAndroidBack = function () {
+  if ($("#sheet").classList.contains("show") || $("#dialog").classList.contains("show")) {
+    closeOverlays();
+    return true;
+  }
+  const current = document.querySelector(".view.active").id;
+  if (current === "chat" || current === "settings") {
+    renderList();
+    show("list");
+    return true;
+  }
+  return false;
+};
 
 /* ?screen=list|chat|approve|models|settings opens straight to a screen
    (for screenshots and quick review). */
