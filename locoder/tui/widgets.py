@@ -172,6 +172,11 @@ class Sidebar(Static):
             Text.assemble(("/help", SECONDARY), ("   commands", MUTED)),
             Text.assemble(("ctrl+b", SECONDARY), ("  hide sidebar", MUTED)),
         ]
+        # Cropped, never wrapped: while the collapse animation narrows the
+        # panel, lines should slide out of view rather than reflow.
+        for block in blocks:
+            block.no_wrap = True
+            block.overflow = "crop"
         self.update(Group(*blocks))
 
 

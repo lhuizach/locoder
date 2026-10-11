@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 from typing import Optional
@@ -16,6 +17,7 @@ from locoder.config import AppConfig, ensure_project_config
 from locoder.context import ContextManager
 from locoder.providers.base import ModelProvider, ProviderError
 from locoder.providers.registry import create_provider
+from locoder.recent import record_project
 from locoder.sandbox import Sandbox
 from locoder.session import SessionStore
 from locoder.ui import UI
@@ -42,7 +44,20 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     project_root = Path.cwd()
+    while True:
+        result = _run(args, project_root)
+        # Picking another project on the home screen restarts locoder there.
+        if isinstance(result, Path):
+            os.chdir(result)
+            project_root = Path.cwd()
+            continue
+        return result
+
+
+def _run(args: argparse.Namespace, project_root: Path) -> int | Path:
+    """Run locoder in ``project_root``: an exit code, or the project to switch to."""
     ensure_project_config(project_root)
+    record_project(project_root)
     config = AppConfig.load(
         project_root,
         model_override=args.model,
@@ -79,14 +94,16 @@ def main(argv: list[str] | None = None) -> int:
         repl(agent, ui, session)
         return 0
 
-    from locoder.tui.app import LocoderApp
+    from locoder.tui.app import LocoderApp, SwitchProject
 
     try:
-        LocoderApp(agent, session, config, project_root).run()
+        result = LocoderApp(agent, session, config, project_root).run()
     except Exception as exc:  # noqa: BLE001 - fall back with actionable guidance
         print(f"locoder: the full-screen UI failed to start ({exc})")
         print("Try running from Windows Terminal, cmd.exe, or PowerShell, or use 'locoder --plain'.")
         return 1
+    if isinstance(result, SwitchProject) and result.path.is_dir():
+        return result.path
     return 0
 
 

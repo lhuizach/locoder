@@ -4,6 +4,7 @@ synchronous Agent loop (always run in a worker thread) to the UI.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from rich.text import Text
@@ -22,13 +23,17 @@ from locoder.session import SessionStore
 from locoder.tools.base import ToolResult
 from locoder.tui.chat_input import ChatInput
 from locoder.tui.commands import build_file_index, expand_file_mentions, find_command
-from locoder.tui.home import HomeFooter, HomeLogo, where_it_runs
+from locoder.recent import RecentItem, recent_conversations, recent_files, recent_projects
+from locoder.tui.home import HomeFooter, HomeLogo, HomeRecent, RecentList, where_it_runs
 from locoder.tui.modals import ConfirmModal, HelpModal, SelectModal, SettingsModal, conversation_options
 from locoder.tui.tui_ui import TuiUI
 from locoder.tui.widgets import ChatLog, Sidebar, StatusBar
 
 CSS_PATH = str(Path(__file__).parent / "app.tcss")
 ATTACHED_FILE_MARKER = "\n\n### Attached file: "
+# Matches #sidebar { width } in app.tcss; the collapse animation runs to and from it.
+SIDEBAR_WIDTH = 34
+SIDEBAR_ANIMATION = 0.22
 
 # Saved tool messages don't record success/failure; these openings are how
 # the tools and dispatcher phrase failures.
@@ -36,6 +41,15 @@ _FAILURE_PREFIXES = (
     "not found:", "permission denied:", "unexpected error", "unknown tool", "user declined",
     "old_string", "command timed out", "search timed out", "ripgrep failed", "invalid regex",
 )
+
+
+@dataclass(frozen=True)
+class SwitchProject:
+    """Returned from LocoderApp.run() when the user picks another project on
+    the home screen; the CLI then starts locoder again in that folder.
+    """
+
+    path: Path
 
 
 def _looks_failed(output: str) -> bool:
@@ -66,6 +80,7 @@ class LocoderApp(App):
         self._model_warmed_up = False
         self._home = False
         self._home_notes: list[Text] = []
+        self._sidebar_hidden = False
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="body"):
@@ -82,6 +97,8 @@ class LocoderApp(App):
                         placeholder='Ask anything... "fix the failing tests"',
                     )
                 yield Static(id="home-notice")
+                yield HomeRecent(id="home-recent")
+                yield Static(id="home-spacer")
             yield Sidebar(id="sidebar")
         yield StatusBar(id="statusbar")
         yield HomeFooter(id="home-footer")
@@ -166,15 +183,74 @@ class LocoderApp(App):
         self._home_notes = []
         self._render_home_notice()
         self.screen.set_class(on, "home")
+        if on:
+            self._load_recent()
         self.chat_input.focus()
 
+    def _load_recent(self) -> None:
+        """Fill "continue where you left off" (file scan off the UI thread)."""
+        recent = self.query_one(HomeRecent)
+        recent.set_items({
+            "conversations": recent_conversations(self.session),
+            "projects": recent_projects(self.project_root),
+        })
+
+        def scan() -> None:
+            files = recent_files(self.project_root)
+            self.call_from_thread(self._set_recent_files, files)
+
+        self.run_worker(scan, thread=True, group="recent-files", exclusive=True)
+
+    def _set_recent_files(self, files: list[RecentItem]) -> None:
+        if self._home:
+            self.query_one(HomeRecent).update_tab("files", files)
+
+    def on_chat_input_down_from_empty(self, message: ChatInput.DownFromEmpty) -> None:
+        if self._home:
+            self.query_one(HomeRecent).focus_list()
+
+    def on_recent_list_leave_top(self, message: RecentList.LeaveTop) -> None:
+        self.chat_input.focus()
+
+    def on_home_recent_chosen(self, message: HomeRecent.Chosen) -> None:
+        item = message.item
+        if item.kind == "conversation":
+            self._resume_conversation(Path(item.value))
+        elif item.kind == "file":
+            # Attach it: @mentions are expanded into the file's contents on send.
+            self.chat_input.value = f"@{item.value} "
+            self.chat_input.cursor_position = len(self.chat_input.value)
+            self.chat_input.focus()
+        elif item.kind == "project":
+            self.exit(SwitchProject(Path(item.value)))
+
     def action_toggle_sidebar(self) -> None:
-        """Ctrl+B or /sidebar. A class on the screen, so the home screen
-        (which never shows the sidebar) keeps hiding it either way.
+        """Ctrl+B or /sidebar: the sidebar narrows and fades out (or grows
+        and fades in). The hidden state is a class on the screen, so the home
+        screen - which never shows the sidebar - keeps hiding it either way.
         """
-        hidden = not self.screen.has_class("sidebar-hidden")
-        self.screen.set_class(hidden, "sidebar-hidden")
+        self._sidebar_hidden = not self._sidebar_hidden
+        hidden = self._sidebar_hidden
         self.status_bar.set_sidebar_hidden(hidden)
+        sidebar = self.sidebar
+        if self._home:
+            self.screen.set_class(hidden, "sidebar-hidden")
+            return
+
+        def finished() -> None:
+            # Only if nothing toggled it back while it was moving.
+            if self._sidebar_hidden:
+                self.screen.add_class("sidebar-hidden")
+
+        if hidden:
+            sidebar.styles.animate("width", 0, duration=SIDEBAR_ANIMATION, easing="out_cubic", on_complete=finished)
+            sidebar.styles.animate("opacity", 0.0, duration=SIDEBAR_ANIMATION, easing="out_cubic")
+        else:
+            sidebar.styles.width = 0
+            sidebar.styles.opacity = 0.0
+            self.screen.remove_class("sidebar-hidden")
+            sidebar.styles.animate("width", SIDEBAR_WIDTH, duration=SIDEBAR_ANIMATION, easing="out_cubic")
+            sidebar.styles.animate("opacity", 1.0, duration=SIDEBAR_ANIMATION, easing="out_cubic")
 
     def _render_home_notice(self) -> None:
         """Under the box: where the model runs, then any recent status lines."""

@@ -40,6 +40,9 @@ class ChatInput(Input):
     class InterruptRequested(Message):
         pass
 
+    class DownFromEmpty(Message):
+        """Down arrow with nothing typed and no history being browsed."""
+
     def __init__(self, *, history_file: Path, file_index: list[str], **kwargs) -> None:
         super().__init__(**kwargs)
         self.history_file = history_file
@@ -138,6 +141,8 @@ class ChatInput(Input):
     def action_history_down(self) -> None:
         if self._active is not None:
             self._active.action_cursor_down()
+        elif self.history_index is None and not self.value:
+            self.post_message(self.DownFromEmpty())
         else:
             self._navigate_history(1)
 
