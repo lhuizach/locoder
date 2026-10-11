@@ -21,15 +21,15 @@ from locoder import __version__
 WORDMARK_COLOR = "#e8e8e8"
 DIM = "#6a6a6a"
 
-# 12 x 14, a compact cut of the logo: a bar across the top with two square
-# holes on the left, and an arm down the right side.
+# 14 x 14, a compact cut of the logo: a bar across the top with two square
+# holes on the left, and an arm down the right side as thick as the bar.
 LOGO = [
-    "############",
-    "#.##########",
-    "############",
-    "#.##########",
-    "############",
-] + [".........###"] * 9
+    "##############",
+    "#.############",
+    "##############",
+    "#.############",
+    "##############",
+] + [".........#####"] * 9
 
 # 7 rows: two for ascenders (l, d), five for the x-height.
 GLYPHS = {
