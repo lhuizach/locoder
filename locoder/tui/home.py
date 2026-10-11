@@ -9,7 +9,6 @@ two square "pixels" and the shapes keep their proportions in any terminal.
 from __future__ import annotations
 
 from pathlib import Path
-from urllib.parse import urlparse
 
 from rich.align import Align
 from rich.table import Table
@@ -17,62 +16,11 @@ from rich.text import Text
 from textual.widgets import Static
 
 from locoder import __version__
+from locoder.display import FG as WORDMARK_COLOR
+from locoder.display import LOGO, pixels_to_text, where_it_runs, wordmark_bitmap
+from locoder.display import MUTED as DIM
 
-WORDMARK_COLOR = "#e8e8e8"
-DIM = "#6a6a6a"
-
-# 14 x 14, a compact cut of the logo: a bar across the top with two square
-# holes on the left, and an arm down the right side as thick as the bar.
-LOGO = [
-    "##############",
-    "#.############",
-    "##############",
-    "#.############",
-    "##############",
-] + [".........#####"] * 9
-
-# 7 rows: two for ascenders (l, d), five for the x-height.
-GLYPHS = {
-    "l": ["#.", "#.", "#.", "#.", "#.", "#.", "##"],
-    "o": ["....", "....", "####", "#..#", "#..#", "#..#", "####"],
-    "c": ["....", "....", "####", "#...", "#...", "#...", "####"],
-    "d": ["...#", "...#", "####", "#..#", "#..#", "#..#", "####"],
-    "e": ["....", "....", "####", "#..#", "####", "#...", "####"],
-    "r": ["....", "....", "####", "#...", "#...", "#...", "#..."],
-}
-
-LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
-
-
-def pixels_to_text(rows: list[str], style: str) -> Text:
-    """Render a '#'/'.' bitmap two rows per line with half blocks."""
-    rows = rows + ["." * len(rows[0])] if len(rows) % 2 else rows
-    text = Text(no_wrap=True, style=style)
-    for y in range(0, len(rows), 2):
-        top, bottom = rows[y], rows[y + 1]
-        for t, b in zip(top, bottom):
-            text.append({(True, True): "█", (True, False): "▀", (False, True): "▄"}.get(
-                (t == "#", b == "#"), " "))
-        if y + 2 < len(rows):
-            text.append("\n")
-    return text
-
-
-def wordmark_bitmap(word: str) -> list[str]:
-    rows = ["" for _ in range(7)]
-    for i, ch in enumerate(word):
-        for r in range(7):
-            rows[r] += GLYPHS[ch][r] + ("." if i < len(word) - 1 else "")
-    return rows
-
-
-def where_it_runs(base_url: str) -> Text:
-    """One line under the prompt box: local, or which host the code goes to."""
-    host = urlparse(base_url).hostname or base_url
-    if host in LOCAL_HOSTS:
-        return Text.assemble(("● ", "#5fb85f"), ("runs locally — your code stays on this machine", DIM))
-    return Text.assemble(("● ", "#d7a84a"), (f"connected to {host} — prompts and files are sent there", DIM))
-
+__all__ = ["HomeFooter", "HomeLogo", "where_it_runs"]
 
 class HomeLogo(Static):
     """The logo, in the current mode's colour, beside the wordmark."""

@@ -111,7 +111,7 @@ def repl(agent: Agent, ui: UI, session: SessionStore) -> None:
 
     while True:
         try:
-            user_input = prompt_session.prompt("you> ") if prompt_session else input("you> ")
+            user_input = prompt_session.prompt(ui.prompt) if prompt_session else input(ui.prompt)
         except EOFError:
             ui.system("goodbye!")
             break

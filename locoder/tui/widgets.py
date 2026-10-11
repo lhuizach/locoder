@@ -1,5 +1,5 @@
-"""Passive display widgets: the header bar, the scrolling chat transcript,
-and the token-usage status bar. All chat content is wrapped in Rich ``Text``/
+"""Passive display widgets: the scrolling chat transcript, the sidebar and
+the bottom status bar. All chat content is wrapped in Rich ``Text``/
 ``Markdown`` objects rather than raw strings, so model or tool output that
 happens to contain ``[...]`` (type hints, list indexing, etc.) can never be
 misparsed as Textual/Rich markup.
@@ -8,15 +8,34 @@ misparsed as Textual/Rich markup.
 from __future__ import annotations
 
 import time
+from pathlib import Path
 from typing import Any
 
 from rich.console import Group
 from rich.markdown import Markdown
 from rich.padding import Padding
+from rich.table import Table
 from rich.text import Text
 from textual.containers import VerticalScroll
 from textual.widgets import Static
 
+from locoder.display import (
+    FAINT,
+    FG,
+    ICON_DECLINED,
+    ICON_ERROR,
+    ICON_OK,
+    ICON_PENDING,
+    MARK,
+    MUTED,
+    SECONDARY,
+    SEP,
+    TOOL_VERBS,
+    context_bar,
+    tool_summary,
+    tool_target,
+    usage_color,
+)
 from locoder.tools.base import ToolResult
 
 MAX_TOOL_RESULT_PREVIEW = 2_000
@@ -25,56 +44,77 @@ MAX_TOOL_RESULT_PREVIEW = 2_000
 # every rendered frame safe for that codec.
 THINKING_FRAMES = ["|", "/", "-", "\\"]
 SPINNER_INTERVAL = 1 / 6
-ACCENT = "#e0954f"
+ACCENT = "#4a9eff"
 
 
-def _short(value: Any, limit: int = 60) -> str:
-    s = value if isinstance(value, str) else repr(value)
-    s = s.replace("\n", "\\n")
-    return s if len(s) <= limit else s[: limit - 1] + "..."
+def _home_relative(path: str) -> str:
+    home = str(Path.home())
+    return "~" + path[len(home):] if path.lower().startswith(home.lower()) else path
 
 
 class StatusBar(Static):
+    """Bottom line: the project folder (or what's running) on the left,
+    context usage on the right - the chat view's version of the home footer.
+    """
+
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        self._usage_text = ""
+        self._project = ""
+        self._used = 0
+        self._limit = 1
         self._spinner_timer = None
         self._spinner_frame = 0
         self._busy_label = "thinking..."
         self._accent = ACCENT
-        self.set_usage(used=0, limit=1)
 
     def set_accent(self, accent: str) -> None:
         self._accent = accent
+        self._redraw()
+
+    def set_project(self, path: str) -> None:
+        self._project = _home_relative(path)
+        self._redraw()
 
     def set_usage(self, *, used: int, limit: int) -> None:
-        pct = (used / limit * 100) if limit else 0.0
-        color = "green" if pct < 70 else ("yellow" if pct < 90 else "red")
-        self._usage_text = f"[{color}]{used:,} tokens[/] [dim]({pct:.0f}% of {limit:,})[/]"
-        if self._spinner_timer is None:
-            self.update(self._usage_text)
+        self._used, self._limit = used, limit
+        self._redraw()
 
     def set_busy(self, busy: bool, label: str = "thinking...") -> None:
         if busy:
             self._busy_label = label
             if self._spinner_timer is None:
                 self._spinner_frame = 0
-                self._spinner_timer = self.set_interval(SPINNER_INTERVAL, self._tick_spinner)
-                self._tick_spinner()
+                self._spinner_timer = self.set_interval(SPINNER_INTERVAL, self._redraw)
         elif self._spinner_timer is not None:
             self._spinner_timer.stop()
             self._spinner_timer = None
-            self.update(self._usage_text)
+        self._redraw()
 
-    def _tick_spinner(self) -> None:
-        frame = THINKING_FRAMES[self._spinner_frame % len(THINKING_FRAMES)]
-        self._spinner_frame += 1
-        # Text, not markup: a "/" or "\" frame would be parsed as a closing tag.
-        self.update(Text.assemble((frame, self._accent), " ", (f"{self._busy_label} (esc to cancel)", "dim")))
+    def _redraw(self) -> None:
+        if self._spinner_timer is not None:
+            frame = THINKING_FRAMES[self._spinner_frame % len(THINKING_FRAMES)]
+            self._spinner_frame += 1
+            # Text, not markup: a "/" or "\" frame would be parsed as a closing tag.
+            left = Text.assemble((frame, self._accent), " ", (self._busy_label, SECONDARY),
+                                 (SEP + "esc to cancel", MUTED))
+        else:
+            left = Text(self._project, style=MUTED)
+        filled, empty, frac = context_bar(self._used, self._limit, width=10)
+        right = Text.assemble(
+            (filled, usage_color(frac, self._accent)), (empty, FAINT),
+            (f"  {frac * 100:.0f}%", SECONDARY), (f"{SEP}{self._used:,} tokens", MUTED),
+        )
+        grid = Table.grid(expand=True)
+        grid.add_column(justify="left", no_wrap=True, overflow="ellipsis")
+        grid.add_column(justify="right", no_wrap=True)
+        grid.add_row(left, right)
+        self.update(grid)
 
 
 class Sidebar(Static):
-    """Right-hand panel: context/token usage and a couple of static facts."""
+    """Right-hand panel (a rounded outline titled "session" in app.tcss):
+    mode, model and context usage.
+    """
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -86,6 +126,9 @@ class Sidebar(Static):
         self._mode_name = "Build"
         self._accent = ACCENT
         self._refresh_display()
+
+    def on_mount(self) -> None:
+        self.border_title = Text(" session ", style=MUTED)
 
     def set_model_info(self, *, provider: str, model: str, yolo: bool, mode_name: str, accent: str = ACCENT) -> None:
         self._provider = provider
@@ -101,99 +144,27 @@ class Sidebar(Static):
         self._refresh_display()
 
     def _refresh_display(self) -> None:
-        pct = (self._used / self._limit * 100) if self._limit else 0.0
-        color = "green" if pct < 70 else ("yellow" if pct < 90 else "red")
-        confirm_mode = f"[bold {self._accent}]yolo[/]" if self._yolo else "confirm"
-        lines = [
-            "[bold]Session[/]",
-            "",
-            "[bold]Mode[/]",
-            f"[bold {self._accent}]{self._mode_name}[/]  [dim](tab to cycle)[/]",
-            "",
-            "[bold]Model[/]",
-            f"{self._provider}:{self._model}",
-            f"writes: {confirm_mode}",
-            "",
-            "[bold]Context[/]",
-            f"[{color}]{self._used:,} tokens[/]",
-            f"{pct:.0f}% used",
-            "",
-            "[dim]/help for commands[/]",
+        filled, empty, frac = context_bar(self._used, self._limit, width=24)
+        writes = Text("yolo - no confirmations", style=f"bold {self._accent}") if self._yolo else Text(
+            "asks before writes and commands", style=MUTED)
+        blocks = [
+            Text.assemble((MARK + " ", self._accent), ("locoder", f"bold {FG}")),
+            Text(""),
+            Text("mode", style=MUTED),
+            Text.assemble((self._mode_name, f"bold {self._accent}"), ("  tab to switch", MUTED)),
+            Text(""),
+            Text("model", style=MUTED),
+            Text(self._model, style=FG),
+            Text.assemble((self._provider, SECONDARY)),
+            writes,
+            Text(""),
+            Text("context", style=MUTED),
+            Text.assemble((filled, usage_color(frac, self._accent)), (empty, FAINT)),
+            Text.assemble((f"{self._used:,}", FG), (f" / {self._limit:,}", MUTED), (f"{SEP}{frac * 100:.0f}%", SECONDARY)),
+            Text(""),
+            Text.assemble(("/help", SECONDARY), ("  commands", MUTED)),
         ]
-        self.update("\n".join(lines))
-
-
-TOOL_VERBS = {
-    "read_file": "Read",
-    "write_file": "Write",
-    "edit_file": "Edit",
-    "list_dir": "List",
-    "search_files": "Search",
-    "run_command": "Run",
-}
-
-# All cp1252-safe (see THINKING_FRAMES above).
-ICON_PENDING = "·"  # middle dot
-ICON_OK = "•"  # bullet
-ICON_ERROR = "×"  # multiplication sign
-ICON_DECLINED = "!"
-SEP = " · "
-
-
-def tool_target(name: str, args: dict[str, Any]) -> str:
-    """The one thing a tool call is about: a path, a command, a pattern."""
-    if name == "search_files":
-        target = f'"{_short(args.get("pattern", ""), 40)}"'
-        path = args.get("path")
-        return f"{target} in {path}" if path and path != "." else target
-    if name == "run_command":
-        return _short(args.get("command", ""), 70)
-    if name == "list_dir":
-        return str(args.get("path") or ".")
-    if name in ("read_file", "write_file", "edit_file"):
-        target = str(args.get("path", ""))
-        start, end = args.get("start_line"), args.get("end_line")
-        if name == "read_file" and (start or end):
-            target += f":{start or 1}-{end or ''}"
-        return target
-    return ", ".join(f"{k}={_short(v, 30)}" for k, v in args.items())
-
-
-def _lines(text: str) -> int:
-    return text.count("\n") + 1 if text else 0
-
-
-def tool_summary(name: str, args: dict[str, Any], result: ToolResult) -> str:
-    """A few words on how a tool call went, e.g. "171 lines" or "exit 1"."""
-    out = result.output.strip()
-    if result.is_error:
-        if "declined" in out:
-            return "declined"
-        first = out.splitlines()[0] if out else "failed"
-        if first.startswith("exit code: "):
-            return "exit " + first[len("exit code: "):]
-        # First clause only; the full message is one click away.
-        return _short(first.split(" - ")[0], 60)
-    if name == "read_file":
-        return "empty" if out == "(empty file)" else f"{_lines(out)} lines"
-    if name == "list_dir":
-        return "empty" if out == "(empty directory)" else f"{_lines(out)} entries"
-    if name == "search_files":
-        if out == "no matches found":
-            return "no matches"
-        hits = [line for line in out.splitlines() if not line.startswith("...")]
-        more = "+" if len(hits) < _lines(out) else ""
-        return f"{len(hits)}{more} match{'' if len(hits) == 1 and not more else 'es'}"
-    if name == "run_command":
-        first = out.splitlines()[0] if out else ""
-        return "exit " + first[len("exit code: "):] if first.startswith("exit code: ") else "done"
-    if name == "edit_file":
-        return f"+{_lines(args.get('new_string', ''))} -{_lines(args.get('old_string', ''))}"
-    if name == "write_file":
-        if "no changes" in out:
-            return "unchanged"
-        return f"{_lines(args.get('content', ''))} lines"
-    return "done"
+        self.update(Group(*blocks))
 
 
 class ThoughtLine(Static):
@@ -262,7 +233,7 @@ class ToolLine(Static):
             (icon, icon_style),
             " ",
             (f"{verb:<7}", "bold"),
-            (tool_target(self.tool_name, self.arguments), "#b0b0b0"),
+            (tool_target(self.tool_name, self.arguments), SECONDARY),
             (f"  {summary}" if summary else "", "red" if icon == ICON_ERROR else "dim"),
         )
         line.no_wrap = True
@@ -350,8 +321,9 @@ class ChatLog(VerticalScroll):
         return self._add(Static(renderable, classes=classes))
 
     def add_user_message(self, text: str) -> None:
-        widget = Static(Text(text), classes="msg-user")
-        widget.styles.border_left = ("thick", self._accent)
+        # A rounded outline titled "you", in the same family as the prompt box.
+        widget = Static(Text(text, style=FG), classes="msg-user")
+        widget.border_title = Text(" you ", style=MUTED)
         self.mount(widget)
         self.scroll_end(animate=False)
         self.anchor()
@@ -366,7 +338,8 @@ class ChatLog(VerticalScroll):
         self._tools = []
         self._infos = set()
         self._last_text = None
-        self.mount(Static(Text("locoder", style=f"bold {self._accent}"), classes="turn-header"))
+        self.mount(Static(Text.assemble((MARK + " ", self._accent), ("locoder", f"bold {self._accent}")),
+                          classes="turn-header"))
         self._thought = ThoughtLine(classes="turn-thought")
         self._thought.display = False
         self.mount(self._thought)

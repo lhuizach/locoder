@@ -9,11 +9,13 @@ import re
 from pathlib import Path
 from typing import Optional
 
+from rich.text import Text
 from textual.binding import Binding
 from textual.message import Message
 from textual.widgets import Input, OptionList
 from textual.widgets.option_list import Option
 
+from locoder.display import FG, MUTED
 from locoder.tui.commands import current_token, filter_commands, filter_files
 
 SLASH_TRIGGER_RE = re.compile(r"^/(\S*)$")
@@ -98,7 +100,12 @@ class ChatInput(Input):
             self._hide_popup(self._slash_popup)
             return
         self._slash_popup.clear_options()
-        self._slash_popup.add_options(Option(f"/{c.name} - {c.description}", id=c.name) for c in matches)
+        # Command names in a column, descriptions dimmed beside them.
+        width = max(len(c.name) for c in matches) + 4
+        self._slash_popup.add_options(
+            Option(Text.assemble((f"/{c.name}".ljust(width), FG), (c.description, MUTED)), id=c.name)
+            for c in matches
+        )
         self._slash_popup.highlighted = 0
         self._slash_popup.display = True
         self._active = self._slash_popup

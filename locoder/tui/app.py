@@ -85,6 +85,11 @@ class LocoderApp(App):
         yield HomeFooter(id="home-footer")
 
     @property
+    def accent(self) -> str:
+        """The current mode's colour; dialogs use it for their titles and highlights."""
+        return MODE_COLORS[self.agent.mode]
+
+    @property
     def chat_log(self) -> ChatLog:
         return self.query_one("#chatlog", ChatLog)
 
@@ -106,6 +111,7 @@ class LocoderApp(App):
         self._refresh_mode_display()
         self._refresh_status_bar()
         self.query_one(HomeFooter).show(self.project_root)
+        self.status_bar.set_project(str(self.project_root))
         self._show_home(True)
         for warning in self.config.warnings:
             self._warn(warning)
@@ -142,8 +148,8 @@ class LocoderApp(App):
         )
         self.chat_log.set_accent(accent)
         self.status_bar.set_accent(accent)
-        self.query_one("#slash-popup").styles.border = ("solid", accent)
-        self.query_one("#file-popup").styles.border = ("solid", accent)
+        for popup in ("#slash-popup", "#file-popup"):
+            self.query_one(popup).styles.border = ("round", Color.parse(accent).with_alpha(0.55))
 
     def _refresh_status_bar(self) -> None:
         used, limit = self.agent.token_usage()

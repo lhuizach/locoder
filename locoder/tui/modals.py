@@ -1,6 +1,10 @@
 """Modal screens: confirmation prompts, model picker, settings editor, and
 the conversation browser. All are plain ModalScreen subclasses driven
 through ``App.push_screen_wait`` so callers can just ``await`` a result.
+
+They share the app's look: a rounded outline over a dimmed screen, the
+title sitting in the top border in the current mode's colour, and flat
+compact controls.
 """
 
 from __future__ import annotations
@@ -9,6 +13,7 @@ from dataclasses import replace
 from typing import Optional
 
 from rich.syntax import Syntax
+from rich.table import Table
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -18,9 +23,30 @@ from textual.widgets import Button, Input, Label, OptionList, Select, Static, Sw
 from textual.widgets.option_list import Option
 
 from locoder.config import AppConfig
+from locoder.display import ERROR, FG, MUTED, SECONDARY
 from locoder.providers.registry import PROVIDER_KINDS
 from locoder.session import SessionSummary
 from locoder.tui.commands import SLASH_COMMANDS
+
+DESTRUCTIVE_MARK = "[DESTRUCTIVE - double check this]"
+
+
+def _accent(screen: ModalScreen) -> str:
+    return getattr(screen.app, "accent", FG)
+
+
+def _title(text: str, color: str) -> Text:
+    return Text(f" {text} ", style=f"bold {color}")
+
+
+def _key_hint(*pairs: tuple[str, str]) -> Text:
+    hint = Text()
+    for i, (key, action) in enumerate(pairs):
+        if i:
+            hint.append("   ")
+        hint.append(key, style=SECONDARY)
+        hint.append(f" {action}", style=MUTED)
+    return hint
 
 
 class ConfirmModal(ModalScreen[bool]):
@@ -32,23 +58,32 @@ class ConfirmModal(ModalScreen[bool]):
 
     def __init__(self, title: str, preview: str, lang: str = "diff") -> None:
         super().__init__()
-        self._title = title
+        self._destructive = DESTRUCTIVE_MARK in title
+        self._title = title.replace(DESTRUCTIVE_MARK, "").strip()
         self._preview = preview
         self._lang = lang
 
     def compose(self) -> ComposeResult:
         with Vertical(id="confirm-box"):
-            yield Static(self._title, id="confirm-title")
+            if self._destructive:
+                yield Static(Text("this command looks destructive - read it carefully", style=f"bold {ERROR}"),
+                             id="confirm-warning")
             with VerticalScroll(id="confirm-preview-box"):
                 if self._lang == "diff":
-                    yield Static(Syntax(self._preview, "diff", theme="ansi_dark", word_wrap=True))
+                    yield Static(Syntax(self._preview, "diff", theme="ansi_dark", word_wrap=True,
+                                        background_color="default"))
                 else:
-                    yield Static(Text(self._preview))
+                    yield Static(Text(self._preview, style=FG))
             with Horizontal(id="confirm-buttons"):
-                yield Button("Proceed (y)", id="yes", variant="success")
-                yield Button("Cancel (n)", id="no", variant="error")
+                yield Static(_key_hint(("y", "proceed"), ("n", "cancel"), ("esc", "cancel")), id="confirm-hint")
+                yield Button("proceed", id="yes", compact=True)
+                yield Button("cancel", id="no", compact=True)
 
     def on_mount(self) -> None:
+        box = self.query_one("#confirm-box")
+        color = ERROR if self._destructive else _accent(self)
+        box.border_title = _title(self._title, color)
+        box.styles.border = ("round", color)
         self.query_one("#no", Button).focus()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -78,11 +113,13 @@ class SelectModal(ModalScreen[Optional[str]]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="select-box"):
-            yield Static(self._title, id="select-title")
-            yield Input(placeholder="type to filter...", id="select-filter")
-            yield OptionList(id="select-list")
+            yield Input(placeholder="type to filter...", id="select-filter", compact=True)
+            yield OptionList(id="select-list", compact=True)
+            yield Static(_key_hint(("↑↓", "move"), ("enter", "choose"), ("esc", "close")), id="select-hint")
 
     def on_mount(self) -> None:
+        box = self.query_one("#select-box")
+        box.border_title = _title(self._title.lower(), _accent(self))
         self._populate("")
         self.query_one("#select-filter", Input).focus()
 
@@ -136,48 +173,59 @@ class SettingsModal(ModalScreen[Optional[AppConfig]]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="settings-box"):
-            yield Static("Settings", id="settings-title")
-            yield Label("Provider")
+            yield Label("provider", classes="field-label")
             yield Select(
                 [(k, k) for k in sorted(PROVIDER_KINDS)],
                 value=self._config.provider if self._config.provider in PROVIDER_KINDS else "ollama",
                 allow_blank=False,
                 id="f-provider",
+                compact=True,
             )
-            yield Label("Model")
-            yield Input(value=self._config.model, id="f-model")
-            yield Label("Base URL")
-            yield Input(value=self._config.base_url, id="f-base-url")
-            yield Label("Temperature")
-            yield Input(value=str(self._config.temperature), id="f-temperature")
-            yield Label("Context window (num_ctx)")
-            yield Input(value=str(self._config.num_ctx), id="f-num-ctx")
+            yield Label("model", classes="field-label")
+            yield Input(value=self._config.model, id="f-model", compact=True)
+            yield Label("base url", classes="field-label")
+            yield Input(value=self._config.base_url, id="f-base-url", compact=True)
+            with Horizontal(classes="settings-pair"):
+                with Vertical():
+                    yield Label("temperature", classes="field-label")
+                    yield Input(value=str(self._config.temperature), id="f-temperature", compact=True)
+                with Vertical():
+                    yield Label("context window", classes="field-label")
+                    yield Input(value=str(self._config.num_ctx), id="f-num-ctx", compact=True)
             with Horizontal(classes="settings-row"):
-                yield Label("YOLO mode (skip confirmations)")
+                yield Label(Text.assemble(("yolo", FG), ("  skip confirmations, this session only", MUTED)))
                 yield Switch(value=self._config.yolo, id="f-yolo")
+            yield Static("", id="settings-error")
             with Horizontal(id="settings-buttons"):
-                yield Button("Save", id="save", variant="success")
-                yield Button("Cancel", id="cancel", variant="error")
+                yield Static(_key_hint(("esc", "cancel")), id="settings-hint")
+                yield Button("save", id="save", compact=True)
+                yield Button("cancel", id="cancel", compact=True)
+
+    def on_mount(self) -> None:
+        self.query_one("#settings-box").border_title = _title("settings", _accent(self))
+        self.query_one("#f-model", Input).focus()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         event.stop()
+
+    def _error(self, message: str) -> None:
+        self.query_one("#settings-error", Static).update(Text(message, style=ERROR))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "cancel":
             self.dismiss(None)
             return
-        title = self.query_one("#settings-title", Static)
         try:
             temperature = float(self.query_one("#f-temperature", Input).value)
             num_ctx = int(self.query_one("#f-num-ctx", Input).value)
         except ValueError:
-            title.update("Settings  [red](temperature/num_ctx must be numbers)[/]")
+            self._error("temperature and context window must be numbers")
             return
 
         model = self.query_one("#f-model", Input).value.strip()
         base_url = self.query_one("#f-base-url", Input).value.strip()
         if not model or not base_url:
-            title.update("Settings  [red](model and base URL can't be empty)[/]")
+            self._error("model and base url can't be empty")
             return
 
         new_config = replace(
@@ -202,21 +250,41 @@ class HelpModal(ModalScreen[None]):
     ]
 
     def compose(self) -> ComposeResult:
-        lines = ["[bold]Slash commands[/]  (type / to see this menu inline)"]
-        for c in SLASH_COMMANDS:
-            aliases = f"  (aka /{', /'.join(c.aliases)})" if c.aliases else ""
-            lines.append(f"  /{c.name}{aliases} - {c.description}")
-        lines.append("")
-        lines.append("[bold]Typing[/]")
-        lines.append("  @fragment   mention a project file - its contents get attached to your message")
-        lines.append("  /fragment   open the command menu")
-        lines.append("  up/down     navigate the open menu, or your message history")
-        lines.append("  tab/enter   accept the highlighted menu item")
-        lines.append("  escape      close a menu")
-        lines.append("")
-        lines.append("[dim]press escape or enter to close this[/]")
         with Vertical(id="help-box"):
-            yield Static("\n".join(lines))
+            yield Static(id="help-body")
+
+    def on_mount(self) -> None:
+        accent = _accent(self)
+        self.query_one("#help-box").border_title = _title("help", accent)
+
+        commands = Table.grid(padding=(0, 2))
+        commands.add_column(no_wrap=True)
+        commands.add_column()
+        for c in SLASH_COMMANDS:
+            aliases = f"  /{', /'.join(c.aliases)}" if c.aliases else ""
+            commands.add_row(Text.assemble((f"/{c.name}", accent), (aliases, MUTED)), Text(c.description, style=SECONDARY))
+
+        keys = Table.grid(padding=(0, 2))
+        keys.add_column(no_wrap=True)
+        keys.add_column()
+        for key, what in [
+            ("@file", "attach a project file's contents to your message"),
+            ("/", "open the command menu"),
+            ("↑ ↓", "move in the open menu, or through your message history"),
+            ("tab", "accept the menu item - or, with no menu open, switch mode"),
+            ("esc", "close a menu, or stop the current answer"),
+        ]:
+            keys.add_row(Text(key, style=FG), Text(what, style=SECONDARY))
+
+        body = Table.grid()
+        body.add_row(Text("commands", style=MUTED))
+        body.add_row(commands)
+        body.add_row(Text(""))
+        body.add_row(Text("keys", style=MUTED))
+        body.add_row(keys)
+        body.add_row(Text(""))
+        body.add_row(_key_hint(("esc", "close")))
+        self.query_one("#help-body", Static).update(body)
 
     def action_close(self) -> None:
         self.dismiss(None)
@@ -226,6 +294,6 @@ def conversation_options(summaries: list[SessionSummary]) -> list[tuple[str, str
     options = []
     for s in summaries:
         when = s.updated_at.split("T")[0] if s.updated_at else "?"
-        label = f"[{when}] {s.title}  ({s.message_count} messages)"
+        label = f"{when}   {s.title}   ({s.message_count} messages)"
         options.append((label, str(s.path)))
     return options
