@@ -26,7 +26,6 @@ from locoder.display import (
     ICON_ERROR,
     ICON_OK,
     ICON_PENDING,
-    MARK,
     MUTED,
     SECONDARY,
     SEP,
@@ -156,7 +155,7 @@ class Sidebar(Static):
         writes = Text("yolo - no confirmations", style=f"bold {self._accent}") if self._yolo else Text(
             "asks before writes and commands", style=MUTED)
         blocks = [
-            Text.assemble((MARK + " ", self._accent), ("locoder", f"bold {FG}")),
+            Text("locoder", style=f"bold {FG}"),
             Text(""),
             Text("mode", style=MUTED),
             Text.assemble((self._mode_name, f"bold {self._accent}"), ("  tab to switch", MUTED)),
@@ -347,8 +346,7 @@ class ChatLog(VerticalScroll):
         self._tools = []
         self._infos = set()
         self._last_text = None
-        self.mount(Static(Text.assemble((MARK + " ", self._accent), ("locoder", f"bold {self._accent}")),
-                          classes="turn-header"))
+        self.mount(Static(Text("locoder", style=f"bold {self._accent}"), classes="turn-header"))
         self._thought = ThoughtLine(classes="turn-thought")
         self._thought.display = False
         self.mount(self._thought)

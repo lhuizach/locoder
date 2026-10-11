@@ -23,12 +23,6 @@ OK = "#5fb85f"
 WARN = "#d7a84a"
 ERROR = "#e5534b"
 
-# The logo's silhouette in two characters: a bar across the top ("▀" is half
-# a cell tall) and an arm down the right ("█" is a full cell wide). Terminal
-# cells are twice as tall as they are wide, so both strokes come out equally
-# thick - a single "▜" would make the bar twice as thick as the arm.
-MARK = "▀█"
-
 # The loading animation: a three-square snake running clockwise around a
 # 4 x 2 loop of quarter-cell squares, drawn two characters wide.
 _SNAKE_PATH = [(0, 0), (1, 0), (2, 0), (3, 0), (3, 1), (2, 1), (1, 1), (0, 1)]

@@ -29,7 +29,6 @@ from locoder.display import (
     ICON_ERROR,
     ICON_OK,
     LOGO,
-    MARK,
     MUTED,
     SECONDARY,
     SEP,
@@ -60,9 +59,6 @@ class UI:
     @property
     def prompt(self) -> str:
         return "› " if self.fancy else "> "
-
-    def _mark(self) -> str:
-        return MARK if self.fancy else ">"
 
     # -- lifecycle / chrome -------------------------------------------------
 
@@ -107,7 +103,7 @@ class UI:
     def stream_token(self, token: str) -> None:
         if not self._streaming:
             self.console.print()
-            self.console.print(Text.assemble((self._mark() + " ", self.accent), ("locoder", f"bold {self.accent}")))
+            self.console.print(Text("locoder", style=f"bold {self.accent}"))
             self._streaming = True
         self.console.print(token, end="", highlight=False, soft_wrap=True, markup=False)
 
