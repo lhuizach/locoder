@@ -6,9 +6,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from textual.app import App, ComposeResult
-from textual.containers import Horizontal, Vertical
 from rich.text import Text
+from textual.app import App, ComposeResult
+from textual.color import Color
+from textual.containers import Horizontal, Vertical
 from textual.widgets import OptionList, Static
 
 from locoder.agent import MODE_COLORS, MODE_ORDER, Agent
@@ -20,10 +21,10 @@ from locoder.session import SessionStore
 from locoder.tools.base import ToolResult
 from locoder.tui.chat_input import ChatInput
 from locoder.tui.commands import build_file_index, expand_file_mentions, find_command
+from locoder.tui.home import HomeFooter, HomeLogo, where_it_runs
 from locoder.tui.modals import ConfirmModal, HelpModal, SelectModal, SettingsModal, conversation_options
 from locoder.tui.tui_ui import TuiUI
-from locoder.tui.home import HomeFooter, HomeLogo
-from locoder.tui.widgets import ChatLog, Sidebar, StatusBar, TopBar
+from locoder.tui.widgets import ChatLog, Sidebar, StatusBar
 
 CSS_PATH = str(Path(__file__).parent / "app.tcss")
 ATTACHED_FILE_MARKER = "\n\n### Attached file: "
@@ -78,7 +79,6 @@ class LocoderApp(App):
                         id="chat-input",
                         placeholder='Ask anything... "fix the failing tests"',
                     )
-                    yield TopBar(id="topbar")
                 yield Static(id="home-notice")
             yield Sidebar(id="sidebar")
         yield StatusBar(id="statusbar")
@@ -93,10 +93,6 @@ class LocoderApp(App):
         return self.query_one("#statusbar", StatusBar)
 
     @property
-    def top_bar(self) -> TopBar:
-        return self.query_one("#topbar", TopBar)
-
-    @property
     def sidebar(self) -> Sidebar:
         return self.query_one("#sidebar", Sidebar)
 
@@ -107,7 +103,7 @@ class LocoderApp(App):
     def on_mount(self) -> None:
         self.chat_log.set_model_name(self.agent.provider.model)
         self.chat_log.set_mode_name(self.agent.mode.value.capitalize())
-        self._refresh_top_bar()
+        self._refresh_mode_display()
         self._refresh_status_bar()
         self.query_one(HomeFooter).show(self.project_root)
         self._show_home(True)
@@ -121,18 +117,22 @@ class LocoderApp(App):
         index = build_file_index(self.agent.sandbox.root)
         self.call_from_thread(setattr, self.chat_input, "file_index", index)
 
-    def _refresh_top_bar(self) -> None:
+    def _refresh_mode_display(self) -> None:
         mode_name = self.agent.mode.value.capitalize()
         accent = MODE_COLORS[self.agent.mode]
-        self.top_bar.set_info(
-            provider=self.config.provider,
-            model=self.agent.provider.model,
-            base_url=self.agent.provider.base_url,
-            yolo=self.agent.yolo,
-            project_root=str(self.project_root),
-            mode_name=mode_name,
-            accent=accent,
-        )
+        # The prompt box carries the mode in its top border and the model in
+        # its bottom border; the logo takes the mode's colour.
+        box = self.query_one("#prompt-box")
+        box.styles.border = ("round", Color.parse(accent).with_alpha(0.55))
+        box.border_title = Text(f" {mode_name} ", style=f"bold {accent}")
+        subtitle = Text.assemble(" ", (self.agent.provider.model, "#c8c8c8"), (" · ", "#555555"),
+                                 (self.config.provider, "#808080"))
+        if self.agent.yolo:
+            subtitle.append_text(Text.assemble((" · ", "#555555"), ("yolo", f"bold {accent}")))
+        subtitle.append(" ")
+        box.border_subtitle = subtitle
+        self.query_one(HomeLogo).set_accent(accent)
+        self._render_home_notice()
         self.sidebar.set_model_info(
             provider=self.config.provider,
             model=self.agent.provider.model,
@@ -142,7 +142,6 @@ class LocoderApp(App):
         )
         self.chat_log.set_accent(accent)
         self.status_bar.set_accent(accent)
-        self.query_one("#prompt-box").styles.border_left = ("thick", accent)
         self.query_one("#slash-popup").styles.border = ("solid", accent)
         self.query_one("#file-popup").styles.border = ("solid", accent)
 
@@ -157,14 +156,14 @@ class LocoderApp(App):
         """The home screen is shown while the conversation is empty."""
         self._home = on
         self._home_notes = []
-        self.query_one("#home-notice", Static).update("")
+        self._render_home_notice()
         self.screen.set_class(on, "home")
         self.chat_input.focus()
 
-    def on_resize(self, event) -> None:  # noqa: ANN001 - events.Resize
-        # Short terminal: the wordmark alone still fits above the box.
-        for logo in self.query(HomeLogo):
-            logo.set_compact(event.size.height < 32)
+    def _render_home_notice(self) -> None:
+        """Under the box: where the model runs, then any recent status lines."""
+        lines = [where_it_runs(self.agent.provider.base_url), *self._home_notes]
+        self.query_one("#home-notice", Static).update(Text("\n").join(lines))
 
     def _say(self, kind: str, msg: str) -> None:
         """A status line: into the transcript, or under the box on the home screen."""
@@ -176,7 +175,7 @@ class LocoderApp(App):
         style = {"warn": "yellow", "error": "bold red", "info": "dim"}.get(kind, "#808080")
         prefix = {"warn": "warning: ", "error": "error: "}.get(kind, "")
         self._home_notes = (self._home_notes + [Text(prefix + msg, style=style)])[-3:]
-        self.query_one("#home-notice", Static).update(Text("\n").join(self._home_notes))
+        self._render_home_notice()
 
     def _warn(self, msg: str) -> None:
         self._say("warn", msg)
@@ -228,7 +227,7 @@ class LocoderApp(App):
         self.agent.set_mode(new_mode)
         mode_name = new_mode.value.capitalize()
         self.chat_log.set_mode_name(mode_name)
-        self._refresh_top_bar()
+        self._refresh_mode_display()
         self._say("system", f"mode: {mode_name}")
 
     def _dispatch_command_text(self, text: str) -> None:
@@ -261,7 +260,7 @@ class LocoderApp(App):
             self._open_conversations()
         elif command.name == "yolo":
             self.agent.set_yolo(not self.agent.yolo)
-            self._refresh_top_bar()
+            self._refresh_mode_display()
             self._say("system", f"yolo mode {'enabled' if self.agent.yolo else 'disabled'}")
         elif command.name == "tokens":
             used, limit = self.agent.token_usage()
@@ -334,7 +333,7 @@ class LocoderApp(App):
         self.config.model = model_name
         self.chat_log.set_model_name(model_name)
         self._model_warmed_up = False
-        self._refresh_top_bar()
+        self._refresh_mode_display()
         self._say("system", f"switched model to '{model_name}'")
 
     # -- settings ---------------------------------------------------------------
@@ -358,7 +357,7 @@ class LocoderApp(App):
             new_config.save(self.project_root)
             self.chat_log.set_model_name(new_config.model)
             self._model_warmed_up = False
-            self._refresh_top_bar()
+            self._refresh_mode_display()
             self._refresh_status_bar()
             self._say("system", 
                 "settings updated and saved to .locoder/config.yaml "

@@ -21,7 +21,7 @@ class TuiUI:
         self.app = app
 
     def banner(self, **kwargs: Any) -> None:
-        pass  # the TopBar widget already shows this; nothing to do here
+        pass  # the prompt box's border already shows the mode and model
 
     def help(self) -> None:
         pass  # the TUI opens HelpModal directly instead of routing through ui.help()

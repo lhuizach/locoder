@@ -98,13 +98,16 @@ ChatLog {
     margin: 0 2;
 }
 
-/* The prompt box: the input with the mode/model line under it. */
+/* The prompt box: a rounded outline in the mode's colour (set in app.py),
+   with the mode in the top border and the model in the bottom border. */
 #prompt-box {
     height: auto;
-    margin: 1 2 1 2;
-    padding: 1 2;
-    border-left: thick #e0954f;
-    background: #141414;
+    margin: 0 2 1 2;
+    padding: 0 1;
+    border: round #2e2e2e;
+    border-title-align: left;
+    border-subtitle-align: right;
+    background: #0d0d0d;
 }
 
 ChatInput {
@@ -112,29 +115,21 @@ ChatInput {
     margin: 0;
     padding: 0;
     border: none;
-    background: #141414;
+    background: #0d0d0d;
     color: #f0f0f0;
 }
 ChatInput:focus {
     border: none;
-    background: #141414;
+    background: #0d0d0d;
     background-tint: transparent;
 }
 /* The theme gives the placeholder its own lighter background (a visible band). */
 ChatInput > .input--placeholder, ChatInput > .input--suggestion {
-    background: #141414;
+    background: #0d0d0d;
 }
 
-TopBar {
-    height: 1;
-    margin-top: 1;
-    padding: 0;
-    background: #141414;
-    color: #808080;
-}
-
-/* Home screen (empty conversation): logo, wordmark and prompt box centred,
-   no transcript, sidebar or token bar. */
+/* Home screen (empty conversation): logo + wordmark lockup and prompt box
+   centred, no transcript, sidebar or token bar. */
 #home-logo, #home-notice, #home-footer {
     display: none;
 }
@@ -152,7 +147,7 @@ Screen.home #home-logo {
     width: 76;
     max-width: 100%;
     content-align: center bottom;
-    margin-bottom: 1;
+    margin-bottom: 2;
 }
 Screen.home #prompt-box {
     width: 76;
@@ -169,7 +164,7 @@ Screen.home #home-notice {
     width: 76;
     max-width: 100%;
     height: 1fr;
-    padding: 1 0 0 0;
+    padding: 0 1;
 }
 Screen.home #home-footer {
     display: block;

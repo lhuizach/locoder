@@ -34,32 +34,6 @@ def _short(value: Any, limit: int = 60) -> str:
     return s if len(s) <= limit else s[: limit - 1] + "..."
 
 
-class TopBar(Static):
-    """The mode/model line under the input, e.g. "Build · qwen3.5:4b ollama"."""
-
-    def set_info(
-        self,
-        *,
-        provider: str,
-        model: str,
-        base_url: str,
-        yolo: bool,
-        project_root: str,
-        mode_name: str,
-        accent: str = ACCENT,
-    ) -> None:
-        line = Text.assemble(
-            (mode_name, accent),
-            (SEP, "#555555"),
-            (model, "bold #e8e8e8"),
-            " ",
-            (provider, "#808080"),
-        )
-        if yolo:
-            line.append_text(Text.assemble((SEP, "#555555"), ("yolo", f"bold {accent}")))
-        self.update(line)
-
-
 class StatusBar(Static):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
