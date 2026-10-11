@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="theme-color" content="#0d0d0d">
 <title>locoder mobile</title>
+<!-- Google Sans Flex (SIL Open Font License). The real app will bundle the
+     font file instead of loading it from Google. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:wght@400..800&display=swap">
 <style>
   /* Same palette as the CLI (locoder/display.py). --accent is the mode colour. */
   :root {
@@ -21,7 +26,7 @@
     --error: #e5534b;
     --accent: #4a9eff;
     --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Menlo, Consolas, monospace;
-    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --sans: "Google Sans Flex", "Google Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     --r: 14px;
     color-scheme: dark;
   }
@@ -53,7 +58,7 @@
   .chip {
     display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
     padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px;
-    font: 600 12px/1.2 var(--mono); color: var(--secondary); white-space: nowrap;
+    font: 600 12px/1.2 var(--sans); color: var(--secondary); white-space: nowrap;
   }
   .chip b { color: var(--fg); font-weight: 800; overflow: hidden; text-overflow: ellipsis; }
   .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex: none; }
@@ -66,15 +71,15 @@
 
   /* ---------- pairing ---------- */
   #pair { justify-content: center; align-items: center; padding: 24px 20px calc(24px + env(safe-area-inset-bottom)); gap: 28px; text-align: center; }
-  #pair h1 { font: 800 18px/1.3 var(--mono); margin: 0; }
+  #pair h1 { font: 800 18px/1.3 var(--sans); margin: 0; }
   #pair p { margin: 6px 0 0; color: var(--secondary); font-size: 14px; }
   .codebox { display: flex; gap: 8px; justify-content: center; }
   .codebox input {
-    width: 42px; height: 52px; text-align: center; font: 800 22px var(--mono);
+    width: 42px; height: 52px; text-align: center; font: 800 22px var(--sans);
     background: var(--bg); border: 1px solid var(--line); border-radius: 10px; outline: none;
   }
   .codebox input:focus { border-color: var(--accent); }
-  .hint { font: 600 12px/1.6 var(--mono); color: var(--muted); }
+  .hint { font: 600 12px/1.6 var(--sans); color: var(--muted); }
   .hint code { color: var(--secondary); background: var(--raise); padding: 1px 6px; border-radius: 6px; }
 
   /* ---------- buttons ---------- */
@@ -90,13 +95,13 @@
   .btn.block { width: 100%; }
 
   /* ---------- chat list ---------- */
-  .brand { display: flex; align-items: center; gap: 10px; font: 800 17px var(--mono); }
+  .brand { display: flex; align-items: center; gap: 10px; font: 800 17px var(--sans); }
   .search {
     margin: 12px 16px 4px; display: flex; align-items: center; gap: 8px;
     border: 1px solid var(--line); border-radius: var(--r); padding: 0 12px; height: 42px; color: var(--muted);
   }
   .search input { flex: 1; background: none; border: 0; outline: none; min-width: 0; }
-  .section-label { font: 600 12px var(--mono); color: var(--muted); padding: 14px 16px 6px; display: flex; justify-content: space-between; }
+  .section-label { font: 600 12px var(--sans); color: var(--muted); padding: 14px 16px 6px; display: flex; justify-content: space-between; }
   .scroll { flex: 1; overflow-y: auto; min-height: 0; overscroll-behavior: contain; }
   .row {
     display: flex; align-items: center; gap: 10px; padding: 12px 8px 12px 16px;
@@ -105,8 +110,8 @@
   .row:active { background: var(--hover); }
   .row .grow { flex: 1; min-width: 0; }
   .row .title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .row .meta { font: 600 12px var(--mono); color: var(--muted); margin-top: 2px; }
-  .empty { padding: 40px 24px; text-align: center; color: var(--muted); font: 600 13px/1.6 var(--mono); }
+  .row .meta { font: 600 12px var(--sans); color: var(--muted); margin-top: 2px; }
+  .empty { padding: 40px 24px; text-align: center; color: var(--muted); font: 600 13px/1.6 var(--sans); }
   .fab {
     position: absolute; right: 18px; bottom: calc(18px + env(safe-area-inset-bottom));
     height: 52px; padding: 0 20px; border-radius: 16px; display: flex; align-items: center; gap: 8px;
@@ -126,10 +131,10 @@
     margin: 14px 0 6px auto; max-width: 88%; width: fit-content;
     border: 1px solid var(--line); border-radius: var(--r); padding: 6px 12px 8px; position: relative;
   }
-  .msg-user .who { font: 600 11px var(--mono); color: var(--muted); }
+  .msg-user .who { font: 600 11px var(--sans); color: var(--muted); }
   .turn { margin: 16px 0 4px; }
-  .turn-head { font: 800 14px var(--mono); color: var(--accent); margin-bottom: 4px; }
-  .thought { font: italic 600 13px var(--mono); color: var(--muted); padding: 2px 0; }
+  .turn-head { font: 800 14px var(--sans); color: var(--accent); margin-bottom: 4px; }
+  .thought { font: italic 600 13px var(--sans); color: var(--muted); padding: 2px 0; }
   .thought .body { display: none; white-space: pre-wrap; padding: 6px 0 4px 12px; border-left: 1px solid var(--line); margin: 4px 0; }
   .thought.open .body { display: block; }
   .tool { font: 600 13px/1.5 var(--mono); padding: 3px 0; color: var(--secondary); }
@@ -149,8 +154,8 @@
   .answer code { font: 600 13px var(--mono); background: var(--raise); padding: 1px 5px; border-radius: 5px; color: #7fd4ff; }
   .answer pre { font: 600 12.5px/1.5 var(--mono); background: var(--raise); padding: 10px 12px; border-radius: 10px; overflow-x: auto; margin: 6px 0 10px; }
   .answer pre code { background: none; padding: 0; color: var(--fg); }
-  .footer { font: 600 12px var(--mono); color: #505050; margin-top: 4px; }
-  .live { font: italic 600 13px var(--mono); color: var(--muted); display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+  .footer { font: 600 12px var(--sans); color: #505050; margin-top: 4px; }
+  .live { font: italic 600 13px var(--sans); color: var(--muted); display: flex; align-items: center; gap: 8px; padding: 4px 0; }
 
   /* the loading snake: 3 squares running clockwise round a 4 x 2 loop */
   .snake { display: grid; grid-template-columns: repeat(4, 5px); grid-template-rows: repeat(2, 5px); gap: 1px; flex: none; }
@@ -162,20 +167,20 @@
     margin: 10px 0; border: 1px solid var(--accent); border-radius: var(--r); overflow: hidden;
   }
   .approve.danger { border-color: var(--error); }
-  .approve .head { padding: 10px 12px 6px; font: 800 13px var(--mono); color: var(--accent); }
+  .approve .head { padding: 10px 12px 6px; font: 800 13px var(--sans); color: var(--accent); }
   .approve.danger .head { color: var(--error); }
-  .approve .warn { padding: 0 12px 6px; font: 600 12px var(--mono); color: var(--error); }
+  .approve .warn { padding: 0 12px 6px; font: 600 12px var(--sans); color: var(--error); }
   .diff { font: 600 12px/1.5 var(--mono); margin: 0 12px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; overflow-x: auto; white-space: pre; }
   .diff .add { color: #7ee787; } .diff .del { color: #ff7b72; } .diff .hunk { color: #d2a8ff; } .diff .meta { color: var(--muted); }
   .approve .actions { display: flex; gap: 8px; padding: 10px 12px 12px; }
   .approve .actions .btn { flex: 1; height: 42px; }
   .approve.done .actions { display: none; }
-  .approve .result { display: none; padding: 0 12px 10px; font: 600 12px var(--mono); color: var(--muted); }
+  .approve .result { display: none; padding: 0 12px 10px; font: 600 12px var(--sans); color: var(--muted); }
   .approve.done .result { display: block; }
 
   /* empty-chat welcome */
   .welcome { padding: 36px 8px 8px; text-align: center; }
-  .welcome .where { font: 600 12px var(--mono); color: var(--muted); margin-top: 18px; }
+  .welcome .where { font: 600 12px var(--sans); color: var(--muted); margin-top: 18px; }
   .suggest { display: flex; flex-direction: column; gap: 8px; margin-top: 22px; text-align: left; }
   .suggest button { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; color: var(--secondary); font-size: 14px; }
   .suggest button:active { background: var(--hover); }
@@ -186,7 +191,7 @@
     border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
     border-radius: 16px; padding: 4px 6px 6px 12px; position: relative;
   }
-  .box-label { position: absolute; top: -9px; left: 12px; background: var(--bg); padding: 0 6px; font: 800 12px var(--mono); color: var(--accent); }
+  .box-label { position: absolute; top: -9px; left: 12px; background: var(--bg); padding: 0 6px; font: 800 12px var(--sans); color: var(--accent); }
   .attachments { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 8px; }
   .attachments .chip { padding: 3px 8px; }
   .box textarea {
@@ -202,12 +207,12 @@
 
   /* ---------- settings ---------- */
   .group { margin: 16px; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
-  .group-title { font: 600 12px var(--mono); color: var(--muted); margin: 18px 20px -8px; }
+  .group-title { font: 600 12px var(--sans); color: var(--muted); margin: 18px 20px -8px; }
   .item { display: flex; align-items: center; gap: 12px; padding: 13px 14px; border-bottom: 1px solid #181818; }
   .item:last-child { border-bottom: 0; }
   .item .grow { flex: 1; min-width: 0; }
   .item .sub { font-size: 12px; color: var(--muted); }
-  .item .val { font: 600 13px var(--mono); color: var(--secondary); }
+  .item .val { font: 600 13px var(--sans); color: var(--secondary); }
   .switch { width: 44px; height: 26px; border-radius: 999px; background: var(--line); position: relative; flex: none; transition: background .2s; }
   .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: var(--secondary); transition: transform .2s, background .2s; }
   .switch.on { background: var(--accent); }
@@ -225,12 +230,12 @@
   }
   .sheet.show { transform: none; }
   .sheet .grab { width: 36px; height: 4px; border-radius: 4px; background: var(--faint); margin: 8px auto 4px; }
-  .sheet h3 { font: 800 14px var(--mono); color: var(--accent); margin: 6px 18px 8px; }
+  .sheet h3 { font: 800 14px var(--sans); color: var(--accent); margin: 6px 18px 8px; }
   .sheet .scroll { padding-bottom: 8px; }
   .opt { display: flex; align-items: center; gap: 12px; padding: 13px 18px; width: 100%; text-align: left; }
   .opt:active { background: var(--hover); }
   .opt .grow { flex: 1; min-width: 0; }
-  .opt .meta { font: 600 12px var(--mono); color: var(--muted); }
+  .opt .meta { font: 600 12px var(--sans); color: var(--muted); }
   .opt .check { color: var(--accent); font-weight: 800; }
   .opt.danger { color: var(--error); }
 
@@ -240,7 +245,7 @@
     opacity: 0; transform: scale(.96); pointer-events: none; transition: opacity .15s, transform .15s;
   }
   .dialog.show { opacity: 1; transform: none; pointer-events: auto; }
-  .dialog h3 { margin: 0 0 6px; font: 800 14px var(--mono); color: var(--accent); }
+  .dialog h3 { margin: 0 0 6px; font: 800 14px var(--sans); color: var(--accent); }
   .dialog p { margin: 0 0 14px; color: var(--secondary); font-size: 14px; }
   .dialog input { width: 100%; height: 44px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); padding: 0 12px; outline: none; margin-bottom: 14px; }
   .dialog input:focus { border-color: var(--accent); }
@@ -248,13 +253,13 @@
 
   .toast {
     position: absolute; left: 50%; bottom: calc(90px + env(safe-area-inset-bottom)); transform: translate(-50%, 20px);
-    background: var(--fg); color: var(--bg); font: 800 13px var(--mono); padding: 8px 14px; border-radius: 10px;
+    background: var(--fg); color: var(--bg); font: 800 13px var(--sans); padding: 8px 14px; border-radius: 10px;
     opacity: 0; transition: opacity .2s, transform .2s; z-index: 20; pointer-events: none; white-space: nowrap;
   }
   .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
   /* prototype banner */
-  .proto { font: 600 11px var(--mono); color: var(--muted); text-align: center; padding: 4px; border-top: 1px dashed var(--line); }
+  .proto { font: 600 11px var(--sans); color: var(--muted); text-align: center; padding: 4px; border-top: 1px dashed var(--line); }
 </style>
 </head>
 <body>
@@ -345,7 +350,7 @@
       <button class="iconbtn" id="settingsBack" aria-label="back">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
       </button>
-      <div class="grow" style="font: 800 16px var(--mono)">settings</div>
+      <div class="grow" style="font: 800 18px var(--sans)">settings</div>
     </div>
     <div class="scroll">
       <div class="group-title">computer</div>
