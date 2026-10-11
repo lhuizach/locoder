@@ -46,6 +46,21 @@ The clickable prototype is `prototype/index.html` (fake data, scripted AI).
 New on the PC side: chat titles you can rename (stored in the session file;
 today the title is just the first message), and deleting a chat.
 
+## Notifications
+
+The prototype already posts real Android notifications through a bridge
+(`window.LocoderAndroid`, `Notifier.kt`): "locoder needs your OK" (high
+priority, when an edit or command is waiting) and "finished" (with the start
+of the answer), only while the app is in the background, cleared when you
+come back. Settings has an on/off switch; Android 13+ asks for permission
+right after pairing.
+
+In the real app the work happens on the PC, so notifications must keep
+coming with the app closed: a small Android foreground service keeps the
+WebSocket to `locoder serve` open while a task is running and turns
+`confirm_request` / `done` events into the same notifications. No Google
+push servers involved, so it stays local.
+
 ## Build order
 
 1. `locoder serve` + pairing + the API above, with tests (no phone needed -

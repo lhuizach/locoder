@@ -4,6 +4,8 @@
     <!-- Loads the font from Google if the bundled copy is missing, and will
          reach `locoder serve` on the PC once the app is wired up. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- "a task needs your approval" / "a task finished" (asked for on Android 13+) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:allowBackup="false"
@@ -15,6 +17,7 @@
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
             android:exported="true"
+            android:launchMode="singleTop"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

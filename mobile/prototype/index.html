@@ -375,6 +375,11 @@
         <div class="item"><div class="grow">context window</div><span class="val">32,768</span></div>
       </div>
 
+      <div class="group-title">notifications</div>
+      <div class="group">
+        <div class="item"><div class="grow">notify me<div class="sub">when a task needs your OK or finishes</div></div><button class="switch on" id="notifySwitch" aria-label="notifications"></button></div>
+      </div>
+
       <div class="group-title">safety</div>
       <div class="group">
         <div class="item"><div class="grow">ask before edits and commands<div class="sub">turning this off = yolo mode</div></div><button class="switch on" id="confirmSwitch" aria-label="ask before edits"></button></div>
@@ -482,7 +487,7 @@ const PROJECTS = [
 const FILES = ["locoder/tui/home.py", "locoder/agent.py", "tests/test_tui.py", "README.md", "locoder/display.py", "pyproject.toml"];
 
 const state = {
-  mode: "build", model: "qwen3.5:4b", confirm: true, project: "~/LoCode",
+  mode: "build", model: "qwen3.5:4b", confirm: true, notify: true, project: "~/LoCode",
   current: null, running: null, attachments: [],
   chats: [
     { id: 1, title: "make the sidebar collapsible", ago: "1h ago", n: 12, ctx: 18, transcript: demoTranscript() },
@@ -573,6 +578,8 @@ function dialog({ title, text, input, okLabel = "ok", danger = false, onOk }) {
   $("#scanBtn").addEventListener("click", () => { toast("camera would open here"); setTimeout(paired, 900); });
   function paired() {
     toast("paired with DESKTOP-LHUIR");
+    // A good moment to ask: the user just chose to connect.
+    if (state.notify) window.LocoderAndroid?.requestPermission();
     renderList();
     show("list");
   }
@@ -901,6 +908,7 @@ async function send() {
     const tools = turn.items.filter(i => i.tool && i.status !== "declined").length;
     turn.footer = `${state.model} · ${((Date.now() - started) / 1000).toFixed(1)}s` + (tools ? ` · ${tools} tools` : "");
     el.append(h("div", { class: "footer" }, turn.footer));
+    notifyPhone("done", c.title, plainText(turn.answer));
     c.ctx = Math.min(95, c.ctx + 6);
     $("#ctxFill").style.width = c.ctx + "%";
   } catch (e) {
@@ -918,6 +926,17 @@ async function send() {
   }
 }
 
+/* Phone notifications, through the Android app's bridge (window.LocoderAndroid).
+   It only posts while the app is in the background; in a plain browser
+   there's no bridge and this does nothing. */
+function notifyPhone(kind, title, body) {
+  if (state.notify) window.LocoderAndroid?.notify(kind, title, body);
+}
+function plainText(markdown) {
+  const text = markdown.replace(/```[\s\S]*?```/g, "").replace(/[*`#]/g, "").replace(/\s+/g, " ").trim();
+  return text.length > 140 ? text.slice(0, 139) + "…" : text;
+}
+
 function approval(addBefore, title, diffLines) {
   return new Promise(resolve => {
     const danger = /rm -rf/.test(diffLines.map(d => d[1]).join(""));
@@ -930,6 +949,7 @@ function approval(addBefore, title, diffLines) {
         h("button", { class: "btn accent", onclick: () => done(true) }, "approve")),
       h("div", { class: "result" }));
     addBefore(card);
+    notifyPhone("approval", "locoder needs your OK", `${title} · ${state.current.title}`);
     const watch = setInterval(() => { if (state.running?.cancelled) done(false); }, 200);
     function done(ok) {
       clearInterval(watch);
@@ -943,6 +963,12 @@ function approval(addBefore, title, diffLines) {
 
 /* ---------- settings ---------- */
 $("#tempRange").addEventListener("input", e => $("#tempVal").textContent = (+e.target.value).toFixed(2).replace(/0$/, ""));
+$("#notifySwitch").addEventListener("click", e => {
+  state.notify = !state.notify;
+  e.target.classList.toggle("on", state.notify);
+  if (state.notify) window.LocoderAndroid?.requestPermission();
+  toast(state.notify ? "notifications on" : "notifications off");
+});
 $("#confirmSwitch").addEventListener("click", e => {
   const turnOff = state.confirm;
   if (turnOff) {
