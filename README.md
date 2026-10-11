@@ -22,6 +22,19 @@ The first run writes a starter config to `.locoder/config.yaml` in the current
 project. Edit it to change the default provider, model, base URL, temperature,
 or context window size.
 
+## Groq (hosted)
+
+Set your key once (from https://console.groq.com/keys), then pick the `groq`
+provider. The base URL is filled in for you.
+
+```bash
+setx GROQ_API_KEY "gsk_..."                              # Windows; new terminals pick it up
+locoder --provider groq --model qwen/qwen3.8-27b
+```
+
+This sends your prompts and the code locoder reads to Groq's servers. Rate
+limits (HTTP 429) are retried automatically for waits of up to 30 seconds.
+
 `yolo` and `allowed_paths` are only read from the global `~/.locoder/config.yaml`
 (or `--yolo`); a project's config can't set them, since that file may come with
 a cloned repo.
@@ -39,7 +52,7 @@ a cloned repo.
 
 - `locoder/cli.py` - entry point and REPL
 - `locoder/agent.py` - the core tool-calling loop
-- `locoder/providers/` - model backends (Ollama, OpenAI-compatible)
+- `locoder/providers/` - model backends (Ollama, Groq, OpenAI-compatible)
 - `locoder/tools/` - file, search, and shell command tools
 - `locoder/config.py` - config file loading
 - `locoder/ui.py` - rich-based terminal rendering

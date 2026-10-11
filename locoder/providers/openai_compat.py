@@ -9,6 +9,7 @@ rather than delivering as one complete object like Ollama does.
 from __future__ import annotations
 
 import json
+import time
 from typing import Any, Iterator, Optional
 
 import requests
@@ -22,9 +23,86 @@ from locoder.providers.base import (
     new_tool_call_id,
 )
 
+# Hosted APIs (Groq especially) answer "slow down" with HTTP 429. Wait and
+# retry a few times rather than failing the whole turn.
+MAX_RATE_LIMIT_RETRIES = 3
+MAX_RATE_LIMIT_WAIT = 30.0
+
+
+class ThinkSplitter:
+    """Separates ``<think>...</think>`` reasoning from answer text in a token
+    stream. Some servers (Groq's default "raw" format, llama.cpp/vLLM without
+    a reasoning parser) put the model's reasoning inline in ``content``; left
+    there it gets shown as the answer and re-sent every turn.
+    """
+
+    OPEN, CLOSE = "<think>", "</think>"
+
+    def __init__(self) -> None:
+        self._buf = ""
+        self._thinking = False
+
+    def feed(self, text: str) -> list[tuple[str, str]]:
+        """Returns (kind, text) pieces, kind being "token" or "thinking"."""
+        self._buf += text
+        out: list[tuple[str, str]] = []
+        while True:
+            tag = self.CLOSE if self._thinking else self.OPEN
+            i = self._buf.find(tag)
+            if i < 0:
+                break
+            self._emit(out, self._buf[:i])
+            self._buf = self._buf[i + len(tag):]
+            self._thinking = not self._thinking
+        # Hold back a tail that could be the start of a tag split across chunks.
+        keep = next((n for n in range(min(len(tag) - 1, len(self._buf)), 0, -1)
+                     if tag.startswith(self._buf[-n:])), 0)
+        self._emit(out, self._buf[:len(self._buf) - keep])
+        self._buf = self._buf[len(self._buf) - keep:]
+        return out
+
+    def flush(self) -> list[tuple[str, str]]:
+        out: list[tuple[str, str]] = []
+        self._emit(out, self._buf)
+        self._buf = ""
+        return out
+
+    def _emit(self, out: list[tuple[str, str]], text: str) -> None:
+        if text:
+            out.append(("thinking" if self._thinking else "token", text))
+
 
 class OpenAICompatProvider(ModelProvider):
     name = "openai_compat"
+
+    def extra_payload(self) -> dict[str, Any]:
+        """Backend-specific request fields; subclasses override."""
+        return {}
+
+    def _post(self, payload: dict[str, Any], stream: bool) -> requests.Response:
+        """POST the chat request, waiting out rate limits. Raises ProviderError
+        with the server's own error message on failure.
+        """
+        url = f"{self.base_url}/chat/completions"
+        for attempt in range(MAX_RATE_LIMIT_RETRIES + 1):
+            try:
+                resp = requests.post(url, json=payload, headers=self._headers(), stream=stream,
+                                     timeout=self.timeout)
+            except requests.RequestException as exc:
+                raise ProviderError(f"request to {self.base_url} failed: {exc}") from exc
+            if resp.status_code == 429 and attempt < MAX_RATE_LIMIT_RETRIES:
+                wait = _retry_after(resp, default=2.0 ** (attempt + 1))
+                if wait <= MAX_RATE_LIMIT_WAIT:
+                    resp.close()
+                    time.sleep(wait)
+                    continue
+            if resp.status_code >= 400:
+                detail = _error_detail(resp)
+                resp.close()
+                hint = " (rate limited - wait a bit and try again)" if resp.status_code == 429 else ""
+                raise ProviderError(f"{self.base_url} returned HTTP {resp.status_code}{hint}: {detail}")
+            return resp
+        raise AssertionError("unreachable")
 
     def _headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -59,20 +137,15 @@ class OpenAICompatProvider(ModelProvider):
             payload["tools"] = tools
         if stream:
             payload["stream_options"] = {"include_usage": True}
+        payload.update(self.extra_payload())
 
         try:
-            resp = requests.post(
-                f"{self.base_url}/chat/completions",
-                json=payload,
-                headers=self._headers(),
-                stream=stream,
-                timeout=self.timeout,
-            )
-            resp.raise_for_status()
-        except requests.RequestException as exc:
-            yield StreamEvent(type="error", error=ProviderError(f"request to {self.base_url} failed: {exc}"))
+            resp = self._post(payload, stream)
+        except ProviderError as exc:
+            yield StreamEvent(type="error", error=exc)
             return
 
+        splitter = ThinkSplitter()
         content_parts: list[str] = []
         pending_calls: dict[int, dict[str, Any]] = {}
         usage: dict[str, int] = {}
@@ -99,17 +172,27 @@ class OpenAICompatProvider(ModelProvider):
                         if not choices:
                             continue
                         delta = choices[0].get("delta") or {}
-                        text = delta.get("content") or ""
-                        if text:
-                            content_parts.append(text)
-                            yield StreamEvent(type="token", token=text)
+                        # Reasoning sent as its own field (Groq "parsed",
+                        # vLLM/llama.cpp reasoning parsers).
+                        reasoning = delta.get("reasoning") or delta.get("reasoning_content") or ""
+                        if reasoning:
+                            yield StreamEvent(type="thinking", token=reasoning)
+                        for kind, piece in splitter.feed(delta.get("content") or ""):
+                            if kind == "token":
+                                content_parts.append(piece)
+                            yield StreamEvent(type=kind, token=piece)
                         for tc_delta in delta.get("tool_calls") or []:
                             self._accumulate_tool_call(pending_calls, tc_delta)
+                    for kind, piece in splitter.flush():
+                        if kind == "token":
+                            content_parts.append(piece)
+                        yield StreamEvent(type=kind, token=piece)
                 else:
                     body = resp.json()
                     choice = (body.get("choices") or [{}])[0]
                     msg = choice.get("message") or {}
-                    content_parts.append(msg.get("content") or "")
+                    pieces = splitter.feed(msg.get("content") or "") + splitter.flush()
+                    content_parts.extend(piece for kind, piece in pieces if kind == "token")
                     for i, raw_tc in enumerate(msg.get("tool_calls") or []):
                         self._accumulate_tool_call(pending_calls, {**raw_tc, "index": i})
                     if body.get("usage"):
@@ -165,3 +248,27 @@ class OpenAICompatProvider(ModelProvider):
             raise ProviderError(f"could not list models from {self.base_url}: {exc}") from exc
         data = resp.json()
         return [m["id"] for m in data.get("data", [])]
+
+
+def _retry_after(resp: requests.Response, *, default: float) -> float:
+    """Seconds the server asked us to wait, from the Retry-After header."""
+    try:
+        return max(0.0, float(resp.headers.get("retry-after", "")))
+    except ValueError:
+        return default
+
+
+def _error_detail(resp: requests.Response) -> str:
+    """The server's own explanation (e.g. Groq's "Request too large ... TPM"),
+    which is far more useful than the bare status code.
+    """
+    try:
+        body = resp.json()
+        err = body.get("error") if isinstance(body, dict) else None
+        if isinstance(err, dict) and err.get("message"):
+            return str(err["message"])
+        if isinstance(err, str):
+            return err
+    except ValueError:
+        pass
+    return (resp.text or resp.reason or "").strip()[:500]

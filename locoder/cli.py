@@ -24,7 +24,7 @@ from locoder.ui import UI
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="locoder", description="A local-first CLI coding agent.")
     parser.add_argument("--model", help="override the model name from config")
-    parser.add_argument("--provider", help="override provider kind: ollama, openai, llamacpp, vllm, lmstudio")
+    parser.add_argument("--provider", help="override provider kind: ollama, groq, openai, llamacpp, vllm, lmstudio")
     parser.add_argument("--base-url", help="override the backend base URL")
     parser.add_argument("--num-ctx", type=int, help="override the context window size (tokens)")
     parser.add_argument("--yolo", action="store_true", help="skip confirmation prompts for writes, edits, and commands")

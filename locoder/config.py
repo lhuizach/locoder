@@ -28,7 +28,7 @@ PROJECT_SETTINGS_KEYS = ("provider", "model", "base_url", "temperature", "num_ct
 
 CONFIG_TEMPLATE = f"""\
 # locoder configuration
-# provider: one of ollama, openai, llamacpp, vllm, lmstudio
+# provider: one of ollama, groq, openai, llamacpp, vllm, lmstudio
 provider: ollama
 model: {DEFAULT_MODEL}
 base_url: http://localhost:11434
@@ -46,7 +46,7 @@ timeout: 120
 """
 
 _KEY_COMMENTS = {
-    "provider": "provider: one of ollama, openai, llamacpp, vllm, lmstudio",
+    "provider": "provider: one of ollama, groq, openai, llamacpp, vllm, lmstudio",
     "num_ctx": "context window size (tokens) of the selected model",
     "context_compaction_threshold": "fraction of num_ctx at which old turns get summarized/truncated",
     "api_key": "api_key: only needed for hosted OpenAI-compatible endpoints",

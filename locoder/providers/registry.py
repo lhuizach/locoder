@@ -9,11 +9,13 @@ they all share OpenAICompatProvider.
 from __future__ import annotations
 
 from locoder.providers.base import ModelProvider
+from locoder.providers.groq import GroqProvider
 from locoder.providers.ollama import OllamaProvider
 from locoder.providers.openai_compat import OpenAICompatProvider
 
 PROVIDER_KINDS = {
     "ollama": OllamaProvider,
+    "groq": GroqProvider,
     "openai": OpenAICompatProvider,
     "openai_compat": OpenAICompatProvider,
     "llamacpp": OpenAICompatProvider,
