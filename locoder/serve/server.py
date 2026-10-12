@@ -274,6 +274,14 @@ class Handler(BaseHTTPRequestHandler):
     def models(self) -> dict[str, Any]:
         return {"models": self.server.hub.models(), "current": self.server.hub.provider.model}
 
+    def memory(self) -> dict[str, Any]:
+        return self.server.hub.model_memory()
+
+    def unload(self) -> dict[str, Any]:
+        result = self.server.hub.unload()
+        self.server.log("unloaded the model from memory (from the phone)")
+        return result
+
     def chats(self) -> dict[str, Any]:
         return {"chats": self.server.hub.chats(), "project": self.server.hub.project_info()}
 
@@ -364,6 +372,8 @@ ROUTES = [
     Route("GET", "/api/state", Handler.state),
     Route("PATCH", "/api/state", Handler.patch_state),
     Route("GET", "/api/models", Handler.models),
+    Route("GET", "/api/memory", Handler.memory),
+    Route("POST", "/api/memory/unload", Handler.unload),
     Route("GET", "/api/chats", Handler.chats),
     Route("POST", "/api/chats", Handler.new_chat),
     Route("GET", "/api/chats/{chat}", Handler.chat),

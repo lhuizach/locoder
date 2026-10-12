@@ -18,6 +18,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+import requests
+
 from locoder import __version__
 from locoder.agent import Agent, AgentMode
 from locoder.config import AppConfig, ensure_project_config
@@ -355,6 +357,52 @@ class Hub:
         state = self.state()
         self.publish("state", state={k: state[k] for k in ("mode", "model", "temperature", "yolo")})
         return state
+
+    # -- the model in memory (Ollama) -------------------------------------------
+
+    def _ollama(self) -> str:
+        if self.config.provider.lower() != "ollama":
+            raise HubError(400, "only Ollama models can be unloaded from here")
+        return self.config.base_url.rstrip("/")
+
+    def model_memory(self) -> dict[str, Any]:
+        """Which models Ollama has loaded right now (it unloads them by itself
+        a few minutes after the last use) and how much memory they hold."""
+        try:
+            resp = requests.get(f"{self._ollama()}/api/ps", timeout=5)
+            resp.raise_for_status()
+            loaded = resp.json().get("models") or []
+        except requests.RequestException as exc:
+            raise HubError(502, f"can't reach Ollama: {exc}") from None
+        out = []
+        for m in loaded:
+            try:
+                expires = datetime.fromisoformat(str(m.get("expires_at", "")).replace("Z", "+00:00"))
+                unloads_in = max(0, int(expires.timestamp() - time.time()))
+            except ValueError:
+                unloads_in = None
+            out.append({
+                "name": m.get("name", ""),
+                "vram_gb": round((m.get("size_vram") or 0) / 1e9, 1),
+                "ram_gb": round(max(0, (m.get("size") or 0) - (m.get("size_vram") or 0)) / 1e9, 1),
+                "unloads_in": unloads_in,
+            })
+        return {"loaded": out}
+
+    def unload(self) -> dict[str, Any]:
+        """Frees the memory now instead of waiting for Ollama's timeout."""
+        if self.run:
+            raise HubError(409, "a task is running - stop it first")
+        base = self._ollama()
+        for m in self.model_memory()["loaded"]:
+            try:
+                # keep_alive 0 is Ollama's way of saying "unload it now".
+                requests.post(f"{base}/api/generate", json={"model": m["name"], "keep_alive": 0},
+                              timeout=30).raise_for_status()
+            except requests.RequestException as exc:
+                raise HubError(502, f"Ollama didn't unload {m['name']}: {exc}") from None
+        self.publish("memory")
+        return self.model_memory()
 
     def models(self) -> list[str]:
         try:

@@ -446,3 +446,50 @@ def test_pairing_link_prints_on_one_line_when_there_is_no_qr():
     lines = out.file.getvalue().splitlines()
     link = next(line for line in lines if "pairing link" in line).split()[-1]
     assert link.endswith("&r=https://some-long-tunnel-name-here.trycloudflare.com") and "#pair=123456&k=" in link
+
+
+# -- the model in memory -------------------------------------------------------------
+
+
+class FakeOllama:
+    def __init__(self) -> None:
+        self.loaded = [{"name": "qwen3.5:4b", "size": 5_400_000_000, "size_vram": 5_400_000_000,
+                        "expires_at": "2999-01-01T00:00:00Z"}]
+        self.unloaded: list[str] = []
+
+    def get(self, url, timeout=None):
+        assert url.endswith("/api/ps")
+        return FakeResponse({"models": self.loaded})
+
+    def post(self, url, json=None, timeout=None):
+        assert url.endswith("/api/generate") and json["keep_alive"] == 0
+        self.unloaded.append(json["model"])
+        self.loaded = [m for m in self.loaded if m["name"] != json["model"]]
+        return FakeResponse({})
+
+
+class FakeResponse:
+    def __init__(self, data) -> None:
+        self.data = data
+
+    def raise_for_status(self) -> None:
+        pass
+
+    def json(self):
+        return self.data
+
+
+def test_model_memory_and_unload(served, monkeypatch):
+    client, hub, pairing, project = served
+    client.key = client.call("POST", "/api/pair", {"code": pairing.current_code()})[1]["key"]
+    ollama = FakeOllama()
+    monkeypatch.setattr(hub_module.requests, "get", ollama.get)
+    monkeypatch.setattr(hub_module.requests, "post", ollama.post)
+
+    loaded = client.call("GET", "/api/memory")[1]["loaded"]
+    assert loaded[0]["name"] == "qwen3.5:4b" and loaded[0]["vram_gb"] == 5.4 and loaded[0]["unloads_in"] > 0
+    assert client.call("POST", "/api/memory/unload")[1] == {"loaded": []}
+    assert ollama.unloaded == ["qwen3.5:4b"]
+
+    hub.config.provider = "openai"
+    assert client.call("GET", "/api/memory")[0] == 400
