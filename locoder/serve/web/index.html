@@ -1,0 +1,1441 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#0d0d0d">
+<meta name="mobile-web-app-capable" content="yes">
+<title>locoder</title>
+<style>
+  /* Google Sans Flex (SIL Open Font License, fonts/OFL.txt), bundled so
+     nothing is fetched from the internet. */
+  @font-face {
+    font-family: "Google Sans Flex";
+    src: url("fonts/GoogleSansFlex-latin.woff2") format("woff2");
+    font-weight: 400 800;
+    font-display: swap;
+  }
+
+  /* Same palette as the CLI (locoder/display.py). --accent is the mode colour. */
+  :root {
+    --bg: #0d0d0d;
+    --raise: #141414;
+    --fg: #e8e8e8;
+    --secondary: #a8a8a8;
+    --muted: #6a6a6a;
+    --faint: #3a3a3a;
+    --line: #2a2a2a;
+    --hover: #1a1a1a;
+    --ok: #5fb85f;
+    --warn: #d7a84a;
+    --error: #e5534b;
+    --accent: #4a9eff;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    --sans: "Google Sans Flex", "Google Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --r: 14px;
+    color-scheme: dark;
+  }
+  :root[data-mode="ask"] { --accent: #4caf50; }
+  :root[data-mode="plan"] { --accent: #e0954f; }
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 600 15px/1.5 var(--sans); }
+  button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+  button:disabled { cursor: default; }
+  input, textarea { font: inherit; color: var(--fg); }
+  .mono { font-family: var(--mono); }
+  .muted { color: var(--muted); }
+  [hidden] { display: none !important; }
+
+  #app { height: 100dvh; display: flex; flex-direction: column; max-width: 560px; margin: 0 auto; position: relative; overflow: hidden; overflow: clip; }
+  .view { display: none; flex-direction: column; flex: 1; min-height: 0; }
+  .view.active { display: flex; }
+
+  /* ---------- top bars ---------- */
+  .topbar {
+    display: flex; align-items: center; gap: 10px;
+    padding: calc(10px + env(safe-area-inset-top)) 16px 10px;
+    border-bottom: 1px solid var(--line);
+  }
+  .topbar .grow { flex: 1; min-width: 0; }
+  .iconbtn { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; color: var(--secondary); flex: none; }
+  .iconbtn:active { background: var(--hover); }
+  .iconbtn svg { width: 20px; height: 20px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+    padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px;
+    font: 600 12px/1.2 var(--sans); color: var(--secondary); white-space: nowrap;
+  }
+  .chip b { color: var(--fg); font-weight: 800; overflow: hidden; text-overflow: ellipsis; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex: none; }
+  .offline .dot, .dot.off { background: var(--error); }
+
+  /* not connected to the PC */
+  .banner {
+    display: none; align-items: center; gap: 10px; padding: 8px 16px;
+    background: color-mix(in srgb, var(--error) 12%, var(--bg)); border-bottom: 1px solid color-mix(in srgb, var(--error) 35%, transparent);
+    font: 600 13px/1.4 var(--sans); color: var(--secondary);
+  }
+  .offline .banner { display: flex; }
+  .banner .grow { flex: 1; }
+  .banner button { color: var(--fg); font-weight: 800; padding: 4px 8px; }
+
+  /* ---------- logo (drawn from the same bitmap as the CLI) ---------- */
+  .pixels { display: grid; gap: 0; }
+  .pixels i { display: block; width: var(--px); height: var(--px); }
+  .pixels i.on { background: var(--c, var(--fg)); }
+  .lockup { display: flex; align-items: center; gap: 18px; justify-content: center; }
+
+  /* ---------- pairing ---------- */
+  #pair { justify-content: center; align-items: center; padding: 24px 20px calc(24px + env(safe-area-inset-bottom)); gap: 26px; text-align: center; overflow-y: auto; }
+  #pair h1 { font: 800 18px/1.3 var(--sans); margin: 0; }
+  #pair p { margin: 6px 0 0; color: var(--secondary); font-size: 14px; }
+  .pair-col { display: flex; flex-direction: column; gap: 10px; width: 100%; max-width: 320px; }
+  .field {
+    width: 100%; height: 46px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg);
+    padding: 0 12px; outline: none; font: 600 15px var(--mono); text-align: center;
+  }
+  .field:focus { border-color: var(--accent); }
+  .found { display: flex; flex-direction: column; gap: 8px; }
+  .found button { display: flex; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; text-align: left; }
+  .found button.sel { border-color: var(--accent); }
+  .found .grow { flex: 1; min-width: 0; }
+  .found .meta { font: 600 12px var(--mono); color: var(--muted); }
+  .codebox { display: flex; gap: 8px; justify-content: center; }
+  .codebox input {
+    width: 42px; height: 52px; text-align: center; font: 800 22px var(--sans);
+    background: var(--bg); border: 1px solid var(--line); border-radius: 10px; outline: none; padding: 0;
+  }
+  .codebox input:focus { border-color: var(--accent); }
+  .codebox.bad input { border-color: var(--error); }
+  .hint { font: 600 12px/1.6 var(--sans); color: var(--muted); }
+  .hint code { color: var(--secondary); background: var(--raise); padding: 1px 6px; border-radius: 6px; }
+  .err-text { color: var(--error); font: 600 13px var(--sans); min-height: 1.4em; }
+
+  /* ---------- buttons ---------- */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    height: 44px; padding: 0 18px; border-radius: 12px; font-weight: 800;
+    border: 1px solid var(--line); color: var(--fg);
+  }
+  .btn.primary { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+  .btn.accent { background: var(--accent); color: #0b0b0b; border-color: var(--accent); }
+  .btn.danger { color: var(--error); border-color: color-mix(in srgb, var(--error) 50%, transparent); }
+  .btn:active { opacity: .8; }
+  .btn:disabled { opacity: .5; }
+  .btn.block { width: 100%; }
+
+  /* ---------- chat list ---------- */
+  .brand { display: flex; align-items: center; gap: 10px; font: 800 17px var(--sans); }
+  .search {
+    margin: 12px 16px 4px; display: flex; align-items: center; gap: 8px;
+    border: 1px solid var(--line); border-radius: var(--r); padding: 0 12px; height: 42px; color: var(--muted);
+  }
+  .search input { flex: 1; background: none; border: 0; outline: none; min-width: 0; }
+  .section-label { font: 600 12px var(--sans); color: var(--muted); padding: 14px 16px 6px; display: flex; justify-content: space-between; gap: 12px; }
+  .section-label span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .scroll { flex: 1; overflow-y: auto; min-height: 0; overscroll-behavior: contain; }
+  .row {
+    display: flex; align-items: center; gap: 10px; padding: 12px 8px 12px 16px;
+    border-bottom: 1px solid #181818;
+  }
+  .row:active { background: var(--hover); }
+  .row .grow { flex: 1; min-width: 0; }
+  .row .title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .meta { font: 600 12px var(--sans); color: var(--muted); margin-top: 2px; display: flex; align-items: center; gap: 6px; }
+  .row .meta .working { color: var(--accent); }
+  .empty { padding: 40px 24px; text-align: center; color: var(--muted); font: 600 13px/1.6 var(--sans); white-space: pre-line; }
+  .fab {
+    position: absolute; right: 18px; bottom: calc(18px + env(safe-area-inset-bottom));
+    height: 52px; padding: 0 20px; border-radius: 16px; display: flex; align-items: center; gap: 8px;
+    background: var(--accent); color: #0b0b0b; font-weight: 800; box-shadow: 0 8px 24px #0009;
+  }
+  .fab svg { width: 20px; height: 20px; }
+
+  /* ---------- chat ---------- */
+  .chat-title { font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chat-sub { display: flex; gap: 6px; margin-top: 4px; flex-wrap: nowrap; overflow: hidden; }
+  .mode-pill { border-color: color-mix(in srgb, var(--accent) 60%, transparent); color: var(--accent); font-weight: 800; }
+  .ctxbar { height: 2px; background: var(--line); }
+  .ctxbar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .4s; }
+
+  #transcript { padding: 8px 16px 20px; }
+  .msg-user {
+    margin: 14px 0 6px auto; max-width: 88%; width: fit-content;
+    border: 1px solid var(--line); border-radius: var(--r); padding: 6px 12px 8px; position: relative;
+    white-space: pre-wrap; overflow-wrap: anywhere;
+  }
+  .msg-user .who { font: 600 11px var(--sans); color: var(--muted); }
+  .turn { margin: 16px 0 4px; }
+  .turn-head { font: 800 14px var(--sans); color: var(--accent); margin-bottom: 4px; }
+  .thought { font: italic 600 13px var(--sans); color: var(--muted); padding: 2px 0; }
+  .thought .body { display: none; white-space: pre-wrap; padding: 6px 0 4px 12px; border-left: 1px solid var(--line); margin: 4px 0; max-height: 320px; overflow: auto; }
+  .thought.open .body { display: block; }
+  .tool { font: 600 13px/1.5 var(--mono); padding: 3px 0; color: var(--secondary); }
+  .tool .line { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+  .tool .icon { width: 10px; flex: none; color: var(--accent); }
+  .tool.err .icon, .tool.err .sum { color: var(--error); }
+  .tool.declined .icon, .tool.declined .sum { color: var(--warn); }
+  .tool.pending .icon { color: var(--muted); }
+  .tool .verb { font-weight: 800; color: var(--fg); flex: none; width: 52px; }
+  .tool .target { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .tool .sum { color: var(--muted); flex: none; margin-left: auto; padding-left: 8px; }
+  .tool .out { display: none; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); font-size: 12px; margin: 4px 0 6px 18px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; max-height: 260px; overflow: auto; }
+  .tool.open .out { display: block; }
+  .answer { margin: 10px 0 4px; overflow-wrap: anywhere; }
+  .answer.narration { color: var(--muted); font-size: 14px; margin: 2px 0; }
+  .answer p { margin: 0 0 8px; }
+  .answer ul, .answer ol { margin: 0 0 8px; padding-left: 22px; }
+  .answer h4 { margin: 12px 0 6px; font: 800 15px var(--sans); }
+  .answer code { font: 600 13px var(--mono); background: var(--raise); padding: 1px 5px; border-radius: 5px; color: #7fd4ff; }
+  .answer pre { font: 600 12.5px/1.5 var(--mono); background: var(--raise); padding: 10px 12px; border-radius: 10px; overflow-x: auto; margin: 6px 0 10px; }
+  .answer pre code { background: none; padding: 0; color: var(--fg); }
+  .note { font: 600 13px/1.4 var(--sans); color: var(--muted); padding: 3px 0; }
+  .note.warn { color: var(--warn); }
+  .note.error { color: var(--error); }
+  .footer { font: 600 12px var(--sans); color: #505050; margin-top: 4px; }
+  .live { font: italic 600 13px var(--sans); color: var(--muted); display: flex; align-items: center; gap: 8px; padding: 4px 0; min-width: 0; }
+  .live span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* the loading snake: 3 squares running clockwise round a 4 x 2 loop */
+  .snake { display: grid; grid-template-columns: repeat(4, 5px); grid-template-rows: repeat(2, 5px); gap: 1px; flex: none; }
+  .snake i { background: transparent; border-radius: 1px; }
+  .snake i.on { background: var(--accent); }
+
+  /* approval card */
+  .approve { margin: 10px 0; border: 1px solid var(--accent); border-radius: var(--r); overflow: hidden; }
+  .approve.danger { border-color: var(--error); }
+  .approve .head { padding: 10px 12px 6px; font: 800 13px var(--sans); color: var(--accent); overflow-wrap: anywhere; }
+  .approve.danger .head { color: var(--error); }
+  .approve .warn { padding: 0 12px 6px; font: 600 12px var(--sans); color: var(--error); }
+  .diff { font: 600 12px/1.5 var(--mono); margin: 0 12px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; overflow: auto; white-space: pre; max-height: 340px; }
+  .diff .add { color: #7ee787; } .diff .del { color: #ff7b72; } .diff .hunk { color: #d2a8ff; } .diff .meta { color: var(--muted); }
+  .approve .actions { display: flex; gap: 8px; padding: 10px 12px 12px; }
+  .approve .actions .btn { flex: 1; height: 42px; }
+  .approve.done .actions { display: none; }
+  .approve .result { display: none; padding: 8px 12px 10px; font: 600 12px var(--sans); color: var(--muted); }
+  .approve.done .result { display: block; }
+
+  /* empty-chat welcome */
+  .welcome { padding: 36px 8px 8px; text-align: center; }
+  .welcome .where { font: 600 12px var(--sans); color: var(--muted); margin-top: 18px; }
+  .suggest { display: flex; flex-direction: column; gap: 8px; margin-top: 22px; text-align: left; }
+  .suggest button { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; color: var(--secondary); font-size: 14px; }
+  .suggest button:active { background: var(--hover); }
+
+  /* composer: the CLI's rounded prompt box, mode on top, model at the bottom */
+  .composer { padding: 8px 12px calc(10px + env(safe-area-inset-bottom)); }
+  .box { border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent); border-radius: 16px; padding: 4px 6px 6px 12px; position: relative; }
+  .box-label { position: absolute; top: -9px; left: 12px; background: var(--bg); padding: 0 6px; font: 800 12px var(--sans); color: var(--accent); }
+  .attachments { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 8px; }
+  .attachments:empty { display: none; }
+  .attachments .chip { padding: 3px 8px; }
+  .box textarea { width: 100%; resize: none; background: none; border: 0; outline: none; padding: 10px 0 6px; max-height: 140px; line-height: 1.4; display: block; }
+  .box-row { display: flex; align-items: center; gap: 4px; }
+  .box-row .grow { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .send { width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; background: var(--accent); color: #0b0b0b; flex: none; }
+  .send:disabled { background: var(--line); color: var(--muted); }
+  .send svg { width: 18px; height: 18px; }
+  .send.stop { background: var(--fg); }
+
+  /* ---------- settings ---------- */
+  .group { margin: 16px; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+  .group-title { font: 600 12px var(--sans); color: var(--muted); margin: 18px 20px -8px; }
+  .item { display: flex; align-items: center; gap: 12px; padding: 13px 14px; border-bottom: 1px solid #181818; width: 100%; text-align: left; }
+  .item:last-child { border-bottom: 0; }
+  .item .grow { flex: 1; min-width: 0; }
+  .item .sub { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+  .item .val { font: 600 13px var(--sans); color: var(--secondary); }
+  .switch { width: 44px; height: 26px; border-radius: 999px; background: var(--line); position: relative; flex: none; transition: background .2s; }
+  .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: var(--secondary); transition: transform .2s, background .2s; }
+  .switch.on { background: var(--accent); }
+  .switch.on::after { transform: translateX(18px); background: #0b0b0b; }
+  input[type=range] { width: 120px; accent-color: var(--accent); }
+
+  /* ---------- bottom sheet + dialog ---------- */
+  .scrim { position: absolute; inset: 0; background: #000a; opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 10; }
+  .scrim.show { opacity: 1; pointer-events: auto; }
+  .sheet {
+    position: absolute; left: 0; right: 0; bottom: 0; z-index: 11;
+    background: var(--bg); border: 1px solid var(--line); border-bottom: 0; border-radius: 20px 20px 0 0;
+    transform: translateY(105%); visibility: hidden;
+    transition: transform .25s cubic-bezier(.2,.8,.2,1), visibility 0s .25s;
+    max-height: 80%; display: flex; flex-direction: column; padding-bottom: env(safe-area-inset-bottom);
+  }
+  .sheet.show { transform: none; visibility: visible; transition: transform .25s cubic-bezier(.2,.8,.2,1); }
+  .sheet .grab { width: 36px; height: 4px; border-radius: 4px; background: var(--faint); margin: 8px auto 4px; }
+  .sheet h3 { font: 800 14px var(--sans); color: var(--accent); margin: 6px 18px 8px; }
+  .sheet .scroll { padding-bottom: 8px; }
+  .opt { display: flex; align-items: center; gap: 12px; padding: 13px 18px; width: 100%; text-align: left; }
+  .opt:active { background: var(--hover); }
+  .opt .grow { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .opt .meta { font: 600 12px var(--sans); color: var(--muted); }
+  .opt .check { color: var(--accent); font-weight: 800; }
+  .opt.danger { color: var(--error); }
+  .sheet .empty { padding: 20px 18px 28px; }
+
+  .dialog {
+    position: absolute; left: 20px; right: 20px; top: 30%; z-index: 12;
+    background: var(--bg); border: 1px solid var(--accent); border-radius: 18px; padding: 18px;
+    opacity: 0; transform: scale(.96); pointer-events: none; transition: opacity .15s, transform .15s;
+  }
+  .dialog.show { opacity: 1; transform: none; pointer-events: auto; }
+  .dialog h3 { margin: 0 0 6px; font: 800 14px var(--sans); color: var(--accent); }
+  .dialog p { margin: 0 0 14px; color: var(--secondary); font-size: 14px; }
+  .dialog input { width: 100%; height: 44px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); padding: 0 12px; outline: none; margin-bottom: 14px; }
+  .dialog input:focus { border-color: var(--accent); }
+  .dialog .actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+  .toast {
+    position: absolute; left: 50%; bottom: calc(90px + env(safe-area-inset-bottom)); transform: translate(-50%, 20px);
+    background: var(--fg); color: var(--bg); font: 800 13px var(--sans); padding: 8px 14px; border-radius: 10px;
+    opacity: 0; transition: opacity .2s, transform .2s; z-index: 20; pointer-events: none; max-width: calc(100% - 32px); text-align: center;
+  }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ================= PAIR ================= -->
+  <section class="view active" id="pair">
+    <div class="lockup" id="pairLogo"></div>
+    <div>
+      <h1 id="pairTitle">pair with your computer</h1>
+      <p>Run <span class="mono">locoder serve</span> on your PC and enter the 6-digit code it shows.</p>
+    </div>
+    <div class="pair-col" id="addrCol" hidden>
+      <div class="found" id="found"></div>
+      <input class="field" id="addrInput" placeholder="PC address, e.g. 192.168.1.24" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <button class="btn block" id="searchBtn">search the network again</button>
+    </div>
+    <div class="codebox" id="codebox"></div>
+    <div class="err-text" id="pairError"></div>
+    <div class="hint">phone and PC on the same Wi-Fi, or both on <code>Tailscale</code></div>
+  </section>
+
+  <!-- ================= CHAT LIST ================= -->
+  <section class="view" id="list">
+    <div class="topbar">
+      <div class="grow">
+        <div class="brand"><span id="miniLogo"></span>locoder</div>
+        <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap">
+          <button class="chip" id="projectChip"><span class="dot"></span><b id="projectName">…</b> <span>▾</span></button>
+        </div>
+      </div>
+      <button class="iconbtn" id="settingsBtn" aria-label="settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+      </button>
+    </div>
+    <div class="banner"><span class="grow" id="bannerText">can't reach your PC</span><button class="retry">retry</button></div>
+    <label class="search">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="searchInput" placeholder="search chats" autocomplete="off">
+    </label>
+    <div class="section-label"><span>chats</span><span id="chatCount"></span></div>
+    <div class="scroll" id="chatList"></div>
+    <button class="fab" id="newChatBtn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+      new chat
+    </button>
+  </section>
+
+  <!-- ================= CHAT ================= -->
+  <section class="view" id="chat">
+    <div class="topbar" style="align-items:flex-start">
+      <button class="iconbtn" id="backBtn" aria-label="back">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
+      </button>
+      <div class="grow">
+        <button class="chat-title" id="chatTitle" style="max-width:100%; display:block; text-align:left">new chat</button>
+        <div class="chat-sub">
+          <button class="chip mode-pill" id="modePill">Build</button>
+          <button class="chip" id="modelChip"><b id="modelName">…</b> ▾</button>
+        </div>
+      </div>
+      <button class="iconbtn" id="chatMenuBtn" aria-label="chat options">
+        <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+      </button>
+    </div>
+    <div class="banner"><span class="grow">can't reach your PC - reconnecting…</span><button class="retry">retry</button></div>
+    <div class="ctxbar" title="context used"><i id="ctxFill"></i></div>
+    <div class="scroll" id="chatScroll"><div id="transcript"></div></div>
+    <div class="composer">
+      <div class="box">
+        <span class="box-label" id="boxLabel">Build</span>
+        <div class="attachments" id="attachments"></div>
+        <textarea id="prompt" rows="1" placeholder='Ask anything… "fix the failing tests"'></textarea>
+        <div class="box-row">
+          <button class="iconbtn" id="attachBtn" aria-label="attach file" style="width:34px;height:34px">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21 12-8.5 8.5a5 5 0 0 1-7-7L14 5a3.5 3.5 0 0 1 5 5l-8.6 8.5a2 2 0 0 1-2.8-2.8L15.5 8"/></svg>
+          </button>
+          <div class="grow mono muted" style="font-size:11px; font-weight:600" id="boxMeta"></div>
+          <button class="send" id="sendBtn" disabled aria-label="send">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= SETTINGS ================= -->
+  <section class="view" id="settings">
+    <div class="topbar">
+      <button class="iconbtn" id="settingsBack" aria-label="back">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
+      </button>
+      <div class="grow" style="font: 800 18px var(--sans)">settings</div>
+    </div>
+    <div class="scroll">
+      <div class="group-title">computer</div>
+      <div class="group">
+        <div class="item"><span class="dot" id="pcDot"></span><div class="grow"><div id="pcName">…</div><div class="sub mono" id="pcAddr"></div></div></div>
+        <div class="item"><div class="grow">model runs<div class="sub">your code stays on your PC</div></div><span class="val" id="whereVal" style="color:var(--ok)">locally</span></div>
+      </div>
+
+      <div class="group-title">model</div>
+      <div class="group">
+        <button class="item" id="settingsModel"><div class="grow">model</div><span class="val" id="settingsModelVal">…</span></button>
+        <div class="item"><div class="grow">temperature<div class="sub">lower = more predictable</div></div><input type="range" min="0" max="1" step="0.05" value="0.2" id="tempRange"><span class="val" id="tempVal" style="width:34px;text-align:right">0.2</span></div>
+        <div class="item"><div class="grow">context window</div><span class="val" id="ctxVal">…</span></div>
+      </div>
+
+      <div class="group-title" id="notifyTitle">notifications</div>
+      <div class="group" id="notifyGroup">
+        <div class="item"><div class="grow">notify me<div class="sub">when a task needs your OK or finishes</div></div><button class="switch on" id="notifySwitch" aria-label="notifications"></button></div>
+      </div>
+
+      <div class="group-title">safety</div>
+      <div class="group">
+        <div class="item"><div class="grow">ask before edits and commands<div class="sub">turning this off = yolo mode, until locoder serve restarts</div></div><button class="switch on" id="confirmSwitch" aria-label="ask before edits"></button></div>
+      </div>
+
+      <div class="group-title">about</div>
+      <div class="group">
+        <div class="item"><div class="grow">locoder</div><span class="val" id="versionVal"></span></div>
+        <button class="item" style="color:var(--error)" id="unpairBtn"><div class="grow">unpair this phone</div></button>
+      </div>
+      <div style="height:30px"></div>
+    </div>
+  </section>
+
+  <div class="scrim" id="scrim"></div>
+  <div class="sheet" id="sheet"><div class="grab"></div><h3 id="sheetTitle"></h3><div class="scroll" id="sheetBody"></div></div>
+  <div class="dialog" id="dialog"></div>
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+/* ======================================================================
+   locoder mobile. Talks to `locoder serve` on your PC: a JSON API for
+   actions and a live event stream for everything the agent does.
+
+   Loaded two ways: from the PC itself (http://<pc>:8765 in a phone
+   browser), or bundled inside the Android app (file://), where it asks
+   for the PC's address and the app's bridge, window.LocoderAndroid,
+   handles finding the PC, notifications and the back button.
+   ====================================================================== */
+
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const h = (tag, attrs = {}, ...kids) => {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v == null || v === false) continue;
+    if (k === "class") el.className = v;
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else if (k === "html") el.innerHTML = v;
+    else el.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid.nodeType ? kid : document.createTextNode(kid));
+  return el;
+};
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const Android = window.LocoderAndroid || null;
+const IN_APP = location.protocol === "file:";
+
+/* ---------- storage ---------- */
+const store = {
+  get(k) { try { return localStorage.getItem("locoder." + k); } catch { return null; } },
+  set(k, v) { try { v == null ? localStorage.removeItem("locoder." + k) : localStorage.setItem("locoder." + k, v); } catch {} },
+};
+
+/* ---------- the API ---------- */
+const api = {
+  base: IN_APP ? (store.get("server") || "") : location.origin,
+  key: store.get("key"),
+  async call(method, path, body) {
+    const headers = {};
+    if (this.key) headers.Authorization = `Bearer ${this.key}`;
+    if (body !== undefined) headers["Content-Type"] = "application/json";
+    let res;
+    try {
+      res = await fetch(this.base + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), cache: "no-store" });
+    } catch {
+      const err = new Error("can't reach your PC");
+      err.status = 0;
+      throw err;
+    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err = new Error(data.error || `error ${res.status}`);
+      err.status = res.status;
+      if (res.status === 401 && path !== "/api/pair") unpaired();
+      throw err;
+    }
+    return data;
+  },
+  get(p) { return this.call("GET", p); },
+  post(p, b = {}) { return this.call("POST", p, b); },
+  patch(p, b) { return this.call("PATCH", p, b); },
+  del(p) { return this.call("DELETE", p); },
+};
+function normalizeServer(text) {
+  let s = text.trim().replace(/\/+$/, "");
+  if (!s) return "";
+  if (!/^https?:\/\//.test(s)) s = "http://" + s;
+  try {
+    const u = new URL(s);
+    if (!u.port) u.port = "8765";
+    return u.origin;
+  } catch { return ""; }
+}
+const shortAddr = () => api.base.replace(/^https?:\/\//, "");
+
+/* ---------- the logo, from the CLI's bitmap ---------- */
+const LOGO = ["##############", "#.############", "##############", "#.############", "##############"]
+  .concat(Array(9).fill(".........#####"));
+const GLYPHS = {
+  l: ["#.", "#.", "#.", "#.", "#.", "#.", "##"],
+  o: ["....", "....", "####", "#..#", "#..#", "#..#", "####"],
+  c: ["....", "....", "####", "#...", "#...", "#...", "####"],
+  d: ["...#", "...#", "####", "#..#", "#..#", "#..#", "####"],
+  e: ["....", "....", "####", "#..#", "####", "#...", "####"],
+  r: ["....", "....", "####", "#...", "#...", "#...", "#..."],
+};
+function pixels(rows, px, color) {
+  const g = h("div", { class: "pixels", style: `grid-template-columns:repeat(${rows[0].length},${px}px);--px:${px}px;--c:${color}` });
+  for (const row of rows) for (const ch of row) g.append(h("i", { class: ch === "#" ? "on" : "" }));
+  return g;
+}
+function wordmark() {
+  const rows = Array(7).fill("");
+  [..."locoder"].forEach((ch, i) => rows.forEach((_, r) => rows[r] += GLYPHS[ch][r] + (i < 6 ? "." : "")));
+  return rows;
+}
+const lockup = px => [pixels(LOGO, px, "var(--accent)"), pixels(wordmark(), px, "var(--fg)")];
+
+/* ---------- the loading snake ---------- */
+const SNAKE_PATH = [[0,0],[1,0],[2,0],[3,0],[3,1],[2,1],[1,1],[0,1]];
+function snake() {
+  const el = h("span", { class: "snake" });
+  const cells = Array.from({ length: 8 }, () => h("i"));
+  el.append(...cells);
+  let f = 0;
+  const tick = () => {
+    if (!el.isConnected && f > 0) return clearInterval(timer);
+    cells.forEach(c => c.classList.remove("on"));
+    for (let k = 0; k < 3; k++) {
+      const [x, y] = SNAKE_PATH[(f - k + 8) % 8];
+      cells[y * 4 + x].classList.add("on");
+    }
+    f++;
+  };
+  tick();
+  const timer = setInterval(tick, 125);
+  return el;
+}
+
+/* ---------- app state ---------- */
+const MODES = ["build", "ask", "plan"];
+const S = {
+  server: null,      // GET /api/state, kept fresh by the event stream
+  chats: [],
+  attachments: [],
+  notify: store.get("notify") !== "off",
+  online: false,
+};
+let view = null;      // the open chat (see openChat)
+
+/* ---------- navigation, toast, sheet, dialog ---------- */
+function show(id) {
+  $$(".view").forEach(v => v.classList.toggle("active", v.id === id));
+}
+const current = () => $(".view.active").id;
+function toast(msg) {
+  const t = $("#toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(t._t);
+  t._t = setTimeout(() => t.classList.remove("show"), 2200);
+}
+function openSheet(title, rows) {
+  $("#sheetTitle").textContent = title;
+  $("#sheetBody").replaceChildren(...rows);
+  $("#scrim").classList.add("show");
+  $("#sheet").classList.add("show");
+}
+function closeOverlays() {
+  $("#scrim").classList.remove("show");
+  $("#sheet").classList.remove("show");
+  $("#dialog").classList.remove("show");
+}
+$("#scrim").addEventListener("click", closeOverlays);
+function dialog({ title, text, input, okLabel = "ok", danger = false, onOk }) {
+  const d = $("#dialog");
+  const field = input != null ? h("input", { value: input }) : null;
+  d.style.borderColor = danger ? "var(--error)" : "";
+  const ok = () => { closeOverlays(); onOk(field ? field.value.trim() : null); };
+  field?.addEventListener("keydown", e => { if (e.key === "Enter") ok(); });
+  d.replaceChildren(
+    h("h3", { style: danger ? "color:var(--error)" : null }, title),
+    text ? h("p", {}, text) : null,
+    field,
+    h("div", { class: "actions" },
+      h("button", { class: "btn", onclick: closeOverlays }, "cancel"),
+      h("button", { class: danger ? "btn danger" : "btn primary", onclick: ok }, okLabel)),
+  );
+  $("#scrim").classList.add("show");
+  d.classList.add("show");
+  if (field) setTimeout(() => { field.focus(); field.select(); }, 50);
+}
+const fail = e => toast(e.message || String(e));
+
+/* ======================================================================
+   Pairing
+   ====================================================================== */
+$("#pairLogo").append(...lockup(5));
+const codeCells = Array.from({ length: 6 }, (_, i) => h("input", { inputmode: "numeric", autocomplete: "one-time-code", "aria-label": `digit ${i + 1}` }));
+$("#codebox").append(...codeCells);
+codeCells.forEach((c, i) => {
+  c.addEventListener("input", () => {
+    const digits = c.value.replace(/\D/g, "");
+    // A pasted code (or fast typing) spills over into the next boxes.
+    c.value = digits.slice(0, 1);
+    [...digits.slice(1)].forEach((d, k) => { if (codeCells[i + 1 + k]) codeCells[i + 1 + k].value = d; });
+    $("#codebox").classList.remove("bad");
+    const next = codeCells.find(x => !x.value);
+    if (next && c.value) next.focus();
+    if (codeCells.every(x => x.value)) pair(codeCells.map(x => x.value).join(""));
+  });
+  c.addEventListener("keydown", e => { if (e.key === "Backspace" && !c.value && i) codeCells[i - 1].focus(); });
+});
+
+async function pair(code) {
+  $("#pairError").textContent = "";
+  if (IN_APP) {
+    const server = normalizeServer($("#addrInput").value);
+    if (!server) {
+      $("#pairError").textContent = "enter your PC's address first (it's shown by locoder serve)";
+      return;
+    }
+    api.base = server;
+  }
+  codeCells.forEach(c => c.blur());
+  try {
+    const device = Android?.deviceName?.() || (/Android/.test(navigator.userAgent) ? "Android browser" : "phone browser");
+    const res = await api.post("/api/pair", { code, device });
+    api.key = res.key;
+    store.set("key", res.key);
+    store.set("server", api.base);
+    Android?.setPairing?.(api.base, res.key);
+    toast(`paired with ${res.computer}`);
+    // A good moment to ask: the user just chose to connect.
+    if (S.notify) Android?.requestPermission?.();
+    await start();
+  } catch (e) {
+    $("#codebox").classList.add("bad");
+    codeCells.forEach(c => c.value = "");
+    codeCells[0].focus();
+    $("#pairError").textContent = e.status === 0 ? `can't reach ${shortAddr() || "that address"} - is locoder serve running?` : e.message;
+  }
+}
+
+function showPair() {
+  stopStream();
+  show("pair");
+  codeCells.forEach(c => c.value = "");
+  if (IN_APP) {
+    $("#addrCol").hidden = false;
+    if (api.base) $("#addrInput").value = shortAddr();
+    discover();
+  } else {
+    api.get("/api/hello").then(r => $("#pairTitle").textContent = `pair with ${r.computer}`).catch(() => {});
+  }
+}
+function unpaired() {
+  if (!api.key) return;
+  api.key = null;
+  store.set("key", null);
+  Android?.clearPairing?.();
+  toast("this phone isn't paired any more");
+  showPair();
+}
+
+/* Finding the PC: the Android app broadcasts on the Wi-Fi and calls back
+   window.onLocoderFound(list). */
+function discover() {
+  if (!Android?.discover) return;
+  $("#found").replaceChildren(h("div", { class: "hint" }, "looking for locoder serve on this Wi-Fi…"));
+  Android.discover();
+}
+window.onLocoderFound = function (list) {
+  const found = $("#found");
+  if (!list.length) {
+    found.replaceChildren(h("div", { class: "hint" }, "no PC found automatically - type its address below"));
+    return;
+  }
+  const pick = (pc, btn) => {
+    $("#addrInput").value = `${pc.host}:${pc.port}`;
+    $$("button", found).forEach(b => b.classList.toggle("sel", b === btn));
+    codeCells[0].focus();
+  };
+  found.replaceChildren(...list.map(pc => {
+    const btn = h("button", { onclick: () => pick(pc, btn) },
+      h("span", { class: "dot" }),
+      h("span", { class: "grow" }, h("div", {}, pc.computer), h("div", { class: "meta" }, `${pc.host}:${pc.port}`)));
+    return btn;
+  }));
+  if (list.length === 1 && !$("#addrInput").value) pick(list[0], $("button", found));
+};
+$("#searchBtn").addEventListener("click", discover);
+
+/* ======================================================================
+   Connection: the live event stream (server-sent events over fetch, so
+   the key can go in a header)
+   ====================================================================== */
+const conn = { seq: 0, ctrl: null, running: false, backoff: 1000, lastData: 0 };
+
+function setOnline(on) {
+  S.online = on;
+  $("#app").classList.toggle("offline", !on);
+  $("#pcDot").classList.toggle("off", !on);
+}
+function stopStream() {
+  conn.running = false;
+  conn.ctrl?.abort();
+}
+async function stream() {
+  if (conn.running) return;
+  conn.running = true;
+  while (conn.running && api.key) {
+    const ctrl = conn.ctrl = new AbortController();
+    try {
+      const res = await fetch(`${api.base}/api/events?since=${conn.seq}`, {
+        headers: { Authorization: `Bearer ${api.key}` }, signal: ctrl.signal, cache: "no-store",
+      });
+      if (res.status === 401) { conn.running = false; unpaired(); return; }
+      if (!res.ok) throw new Error(`events ${res.status}`);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      conn.lastData = Date.now();
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        conn.lastData = Date.now();
+        if (!S.online) { setOnline(true); conn.backoff = 1000; }
+        buf += decoder.decode(value, { stream: true });
+        let cut;
+        while ((cut = buf.indexOf("\n\n")) >= 0) {
+          const chunk = buf.slice(0, cut);
+          buf = buf.slice(cut + 2);
+          for (const line of chunk.split("\n")) {
+            if (!line.startsWith("data: ")) continue;
+            try { onEvent(JSON.parse(line.slice(6))); } catch (e) { console.error(e); }
+          }
+        }
+      }
+    } catch (e) {
+      if (!conn.running) return;
+    }
+    setOnline(false);
+    await sleep(conn.backoff);
+    conn.backoff = Math.min(conn.backoff * 2, 8000);
+  }
+  conn.running = false;
+}
+// The server pings every 15s; a stream that has gone quiet for longer is dead
+// (Wi-Fi changed, PC slept) even if the socket hasn't noticed yet.
+setInterval(() => {
+  if (conn.running && S.online && Date.now() - conn.lastData > 40000) conn.ctrl?.abort();
+}, 5000);
+function reconnectNow() {
+  conn.backoff = 1000;
+  if (conn.running) conn.ctrl?.abort();
+  else if (api.key) stream();
+}
+$$(".retry").forEach(b => b.addEventListener("click", () => { reconnectNow(); refresh(); }));
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && api.key && !S.online) { reconnectNow(); refresh(); }
+});
+
+function onEvent(ev) {
+  if (ev.seq) conn.seq = Math.max(conn.seq, ev.seq);
+  switch (ev.type) {
+    case "hello":
+      setOnline(true);
+      applyState(ev.state);  // anything missed while away is replayed after this
+      return;
+    case "resync":
+      refresh();
+      return;
+    case "state":
+      applyState(ev.state);
+      return;
+    case "project":
+      S.server.project = ev.project;
+      applyState({});
+      loadChats();
+      if (current() === "chat") show("list");
+      return;
+    case "chats":
+      clearTimeout(onEvent._chats);
+      onEvent._chats = setTimeout(loadChats, 150);
+      return;
+    case "run_start":
+      S.server.running = ev.chat;
+      tellAndroid();
+      break;
+    case "run_end":
+      S.server.running = null;
+      tellAndroid();
+      break;
+  }
+  if (view && ev.chat === view.id && ev.seq > view.seq) {
+    view.seq = ev.seq;
+    applyToView(ev);
+  }
+}
+
+function applyState(st) {
+  S.server = { ...(S.server || {}), ...st };
+  const s = S.server;
+  setMode(s.mode || "build");
+  $("#modelName").textContent = s.model;
+  $("#settingsModelVal").textContent = s.model;
+  $("#boxMeta").textContent = `${s.model} · ${s.provider}`;
+  $("#projectName").textContent = s.project?.name || s.project?.label || "";
+  $("#pcName").textContent = s.computer;
+  $("#pcAddr").textContent = shortAddr();
+  $("#versionVal").textContent = s.version ? `v${s.version}` : "";
+  $("#ctxVal").textContent = (s.num_ctx || 0).toLocaleString("en");
+  $("#confirmSwitch").classList.toggle("on", !s.yolo);
+  if (document.activeElement !== $("#tempRange") && s.temperature != null) {
+    $("#tempRange").value = s.temperature;
+    $("#tempVal").textContent = fmtTemp(s.temperature);
+  }
+  const local = /localhost|127\.0\.0\.1|0\.0\.0\.0|\[?::1\]?/.test(s.base_url || "localhost");
+  $("#whereVal").textContent = local ? "locally" : "remotely";
+  $("#whereVal").style.color = local ? "var(--ok)" : "var(--warn)";
+  tellAndroid();
+  updateSend();
+}
+// So the app knows to keep watching (and notify) after you leave it.
+function tellAndroid() {
+  Android?.setTaskRunning?.(!!S.server?.running, S.server?.computer || null);
+}
+
+async function start() {
+  Android?.setPairing?.(api.base, api.key);
+  Android?.setNotify?.(S.notify);
+  try {
+    applyState(await api.get("/api/state"));
+    conn.seq = S.server.seq;
+    setOnline(true);
+  } catch (e) {
+    if (e.status === 401) return;
+    setOnline(false);
+    $("#bannerText").textContent = `can't reach your PC (${shortAddr()}) - is locoder serve running?`;
+  }
+  show("list");
+  if (S.server) loadChats();
+  stream();
+}
+async function refresh() {
+  if (!api.key) return;
+  try { applyState(await api.get("/api/state")); } catch { return; }
+  loadChats();
+  if (view?.id && current() === "chat") openChat(view.id, { keepScroll: true });
+}
+
+/* ======================================================================
+   Chat list
+   ====================================================================== */
+$("#miniLogo").append(pixels(LOGO, 2, "var(--accent)"));
+async function loadChats() {
+  try {
+    const res = await api.get("/api/chats");
+    S.chats = res.chats;
+    renderList();
+    if (view?.id) {
+      const c = S.chats.find(x => x.id === view.id);
+      if (c) $("#chatTitle").textContent = view.title = c.title;
+    }
+  } catch {}
+}
+function renderList() {
+  const q = $("#searchInput").value.toLowerCase();
+  const chats = S.chats.filter(c => c.title.toLowerCase().includes(q));
+  $("#chatCount").textContent = `${S.chats.length} in ${S.server?.project?.label || ""}`;
+  const list = $("#chatList");
+  if (!chats.length) {
+    list.replaceChildren(h("div", { class: "empty" }, q ? "no chats match" : "no chats in this project yet\ntap new chat to start"));
+    return;
+  }
+  list.replaceChildren(...chats.map(c =>
+    h("div", { class: "row", onclick: () => openChat(c.id) },
+      h("div", { class: "grow" },
+        h("div", { class: "title" }, c.title),
+        h("div", { class: "meta" }, c.running ? [snake(), h("span", { class: "working" }, "working")] : `${c.ago} · ${c.messages} messages`)),
+      h("button", { class: "iconbtn", "aria-label": "chat options", onclick: e => { e.stopPropagation(); chatMenu(c); },
+        html: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>' }))));
+}
+$("#searchInput").addEventListener("input", renderList);
+$("#newChatBtn").addEventListener("click", () => openChat(null));
+$("#settingsBtn").addEventListener("click", () => show("settings"));
+$("#settingsBack").addEventListener("click", () => show("list"));
+
+function chatMenu(c) {
+  openSheet(c.title, [
+    h("button", { class: "opt", onclick: () => { closeOverlays(); renameChat(c); } }, h("span", { class: "grow" }, "rename")),
+    h("button", { class: "opt", onclick: () => { closeOverlays(); exportChat(c); } }, h("span", { class: "grow" }, "copy as markdown")),
+    h("button", { class: "opt danger", onclick: () => { closeOverlays(); deleteChat(c); } }, h("span", { class: "grow" }, "delete")),
+  ]);
+}
+function renameChat(c) {
+  dialog({ title: "rename chat", input: c.title, okLabel: "save", onOk: async v => {
+    if (!v) return;
+    try {
+      const res = await api.patch(`/api/chats/${c.id}`, { title: v });
+      c.title = res.title;
+      if (view?.id === c.id) $("#chatTitle").textContent = view.title = res.title;
+      loadChats();
+    } catch (e) { fail(e); }
+  } });
+}
+function deleteChat(c) {
+  dialog({ title: "delete chat?", text: `"${c.title}" will be deleted from your PC too.`, okLabel: "delete", danger: true, onOk: async () => {
+    try {
+      await api.del(`/api/chats/${c.id}`);
+      if (view?.id === c.id) { view = null; show("list"); }
+      S.chats = S.chats.filter(x => x.id !== c.id);
+      renderList();
+      toast("chat deleted");
+    } catch (e) { fail(e); }
+  } });
+}
+async function exportChat(c) {
+  try {
+    const chat = await api.get(`/api/chats/${c.id}`);
+    const md = [`# ${chat.title}`, ""];
+    for (const e of chat.entries) {
+      if (e.type === "user") md.push(`**you:** ${e.text}`, "");
+      else if (e.type === "text") md.push(e.text, "");
+      else md.push(`- ${e.verb} \`${e.target}\` (${e.summary})`, "");
+    }
+    copyText(md.join("\n"));
+    toast("copied as markdown");
+  } catch (e) { fail(e); }
+}
+function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text);
+  const ta = h("textarea", { style: "position:fixed;opacity:0" });
+  ta.value = text;
+  document.body.append(ta);
+  ta.select();
+  document.execCommand("copy");
+  ta.remove();
+}
+
+$("#projectChip").addEventListener("click", async () => {
+  try {
+    const { projects } = await api.get("/api/projects");
+    openSheet("projects on your PC", projects.length > 1 ? projects.map(p =>
+      h("button", { class: "opt", onclick: async () => {
+        closeOverlays();
+        if (p.current) return;
+        try {
+          await api.post("/api/projects/switch", { path: p.path });
+          toast(`switched to ${p.label}`);
+        } catch (e) { fail(e); }
+      } },
+        h("span", { class: "grow" }, h("div", { class: "mono" }, p.label), h("div", { class: "meta" }, p.detail)),
+        p.current ? h("span", { class: "check" }, "✓") : null))
+      : [h("div", { class: "empty" }, "this is the only project so far\nrun locoder in another folder and it shows up here")]);
+  } catch (e) { fail(e); }
+});
+
+/* ======================================================================
+   Chat screen
+   ====================================================================== */
+function newView(id, title) {
+  return {
+    id, title, seq: 0,
+    turn: null, live: null, liveLabel: "Thinking", phaseStart: 0, clock: null,
+    text: null, textBuf: "", lastText: null,
+    thought: null, thoughtBuf: "", thoughtStart: 0,
+    pendingTool: null, tools: 0, cards: {},
+  };
+}
+
+async function openChat(id, { keepScroll = false } = {}) {
+  closeOverlays();
+  if (!id) {
+    clearInterval(view?.clock);
+    setRunning(false);
+    view = newView(null, "new chat");
+    $("#chatTitle").textContent = "new chat";
+    $("#ctxFill").style.width = "0%";
+    renderWelcome();
+    show("chat");
+    updateSend();
+    return;
+  }
+  let chat;
+  try {
+    chat = await api.get(`/api/chats/${id}`);
+  } catch (e) {
+    fail(e);
+    if (e.status === 404) { show("list"); loadChats(); }
+    return;
+  }
+  const scroller = $("#chatScroll");
+  const oldScroll = scroller.scrollTop;
+  clearInterval(view?.clock);
+  setRunning(false);
+  view = newView(chat.id, chat.title);
+  view.seq = chat.seq;
+  $("#chatTitle").textContent = chat.title;
+  setUsage(chat.usage);
+  renderEntries(chat.entries);
+  if (chat.live) {
+    // A task is running in this chat: draw it from the start.
+    view.phaseStart = chat.live.started * 1000;
+    for (const ev of chat.live.events) applyToView(ev, true);
+    ensureTurn();
+  }
+  show("chat");
+  updateSend();
+  if (keepScroll) scroller.scrollTop = oldScroll; else scrollDown(true);
+}
+$("#backBtn").addEventListener("click", () => { show("list"); loadChats(); });
+$("#chatTitle").addEventListener("click", () => view?.id && renameChat({ id: view.id, title: view.title }));
+$("#chatMenuBtn").addEventListener("click", () => view?.id ? chatMenu({ id: view.id, title: view.title }) : toast("send a message first"));
+
+function renderWelcome() {
+  const where = S.server?.computer ? `runs on ${S.server.computer} - your code stays on your PC` : "runs on your PC - your code stays there";
+  $("#transcript").replaceChildren(h("div", { class: "welcome" },
+    h("div", { class: "lockup" }, ...lockup(3)),
+    h("div", { class: "where" }, h("span", { style: "color:var(--ok)" }, "● "), where),
+    h("div", { class: "suggest" },
+      ...["explain how this project is put together", "find and fix the failing tests", "what changed most recently?"].map(s =>
+        h("button", { onclick: () => { prompt.value = s; send(); } }, s)))));
+}
+
+function renderEntries(entries) {
+  const out = [];
+  let turn = null;
+  for (const e of entries) {
+    if (e.type === "user") {
+      turn = null;
+      out.push(userMsg(e.text));
+      continue;
+    }
+    if (!turn) {
+      turn = h("div", { class: "turn" }, h("div", { class: "turn-head" }, "locoder"));
+      out.push(turn);
+    }
+    if (e.type === "text") turn.append(h("div", { class: e.narration ? "answer narration" : "answer", html: md(e.text) }));
+    else turn.append(toolView(e));
+  }
+  $("#transcript").replaceChildren(...out);
+}
+function userMsg(text) {
+  return h("div", { class: "msg-user" }, h("div", { class: "who" }, "you"), h("div", {}, text));
+}
+function toolView({ verb, target, summary, output, status = "ok" }) {
+  const icon = { ok: "•", err: "×", declined: "!", pending: "·" }[status] || "•";
+  const el = h("div", { class: `tool ${status === "ok" ? "" : status}` },
+    h("div", { class: "line" }, h("span", { class: "icon" }, icon), h("span", { class: "verb" }, verb), h("span", { class: "target" }, target), h("span", { class: "sum" }, summary || "")),
+    h("div", { class: "out" }, output || ""));
+  el.addEventListener("click", () => output && el.classList.toggle("open"));
+  return el;
+}
+function md(src) {
+  const inline = s => esc(s)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+  const parts = String(src).split(/```[\w+-]*\n?/);
+  return parts.map((p, i) => {
+    if (i % 2) return `<pre><code>${esc(p.replace(/\n$/, ""))}</code></pre>`;
+    return p.split(/\n{2,}/).filter(x => x.trim()).map(block => {
+      const lines = block.split("\n");
+      if (lines.every(l => /^\s*[-*] /.test(l) || !l.trim()))
+        return "<ul>" + lines.filter(l => l.trim()).map(l => `<li>${inline(l.replace(/^\s*[-*] /, ""))}</li>`).join("") + "</ul>";
+      if (lines.every(l => /^\s*\d+[.)] /.test(l) || !l.trim()))
+        return "<ol>" + lines.filter(l => l.trim()).map(l => `<li>${inline(l.replace(/^\s*\d+[.)] /, ""))}</li>`).join("") + "</ol>";
+      if (/^#{1,6} /.test(lines[0]) && lines.length === 1) return `<h4>${inline(lines[0].replace(/^#+ /, ""))}</h4>`;
+      return `<p>${lines.map(inline).join("<br>")}</p>`;
+    }).join("");
+  }).join("");
+}
+function nearBottom() {
+  const s = $("#chatScroll");
+  return s.scrollHeight - s.scrollTop - s.clientHeight < 120;
+}
+function scrollDown(force = false) {
+  const s = $("#chatScroll");
+  if (force || nearBottom()) requestAnimationFrame(() => s.scrollTop = s.scrollHeight);
+}
+function setUsage(u) {
+  if (!u || !u.limit) return;
+  $("#ctxFill").style.width = Math.min(100, Math.max(1, 100 * u.used / u.limit)) + "%";
+}
+
+/* ---------- the live turn, built from events ---------- */
+function ensureTurn() {
+  if (view.turn) return;
+  view.turn = h("div", { class: "turn" }, h("div", { class: "turn-head" }, "locoder"));
+  view.live = h("div", { class: "live" }, snake(), h("span", {}, "Thinking 0s"));
+  view.turn.append(view.live);
+  $("#transcript").append(view.turn);
+  if (!view.phaseStart) view.phaseStart = Date.now();
+  view.started = view.started || view.phaseStart;
+  clearInterval(view.clock);
+  const v = view;
+  v.clock = setInterval(() => {
+    if (v.live?.isConnected) v.live.lastChild.textContent = `${v.liveLabel} ${Math.max(0, Math.floor((Date.now() - v.phaseStart) / 1000))}s`;
+  }, 250);
+}
+function setLive(label) {
+  view.liveLabel = label;
+  view.phaseStart = Date.now();
+  if (view.live) view.live.lastChild.textContent = `${label} 0s`;
+}
+function addToTurn(node) {
+  ensureTurn();
+  view.turn.insertBefore(node, view.live);
+  scrollDown();
+}
+function closeThought(now = Date.now()) {
+  if (!view.thought) return;
+  const secs = Math.max(0, now - view.thoughtStart) / 1000;
+  view.thought.firstChild.textContent = `Thought for ${secs.toFixed(1)}s`;
+  view.thought = null;
+  view.thoughtBuf = "";
+}
+
+function applyToView(ev, replay = false) {
+  const at = ev.t ? ev.t * 1000 : Date.now();  // the PC's clock, for durations
+  switch (ev.type) {
+    case "run_start":
+      if (!replay && !view.userShown) $("#transcript").append(userMsg(ev.text));
+      view.userShown = false;
+      view.started = Date.now();
+      ensureTurn();
+      setRunning(true);
+      return;
+    case "thinking":
+      if (!view.thought) {
+        view.thoughtStart = at;
+        const el = h("div", { class: "thought" }, h("span", {}, "Thinking…"), h("div", { class: "body" }));
+        el.addEventListener("click", () => el.classList.toggle("open"));
+        view.thought = el;
+        addToTurn(el);
+      }
+      view.thoughtBuf += ev.text;
+      view.thought.lastChild.textContent = view.thoughtBuf;
+      return;
+    case "token":
+      closeThought(at);
+      if (!view.text) {
+        view.text = h("div", { class: "answer" });
+        view.textBuf = "";
+        addToTurn(view.text);
+        setLive("Writing");
+      }
+      view.textBuf += ev.text;
+      if (!view._raf) {
+        view._raf = requestAnimationFrame(() => {
+          view._raf = null;
+          if (view.text) { view.text.innerHTML = md(view.textBuf); scrollDown(); }
+        });
+      }
+      if (replay) view.text.innerHTML = md(view.textBuf);
+      return;
+    case "end_stream":
+      closeThought(at);
+      if (view.text) {
+        view.text.innerHTML = md(view.textBuf);
+        view.lastText = view.text;
+      }
+      view.text = null;
+      setLive("Thinking");
+      return;
+    case "tool_call":
+      // Text written just before a tool call was narration, not the answer.
+      view.lastText?.classList.add("narration");
+      view.lastText = null;
+      view.pendingTool = toolView({ verb: ev.verb, target: ev.target, summary: "", status: "pending" });
+      addToTurn(view.pendingTool);
+      setLive(`${ev.verb} ${ev.target}`);
+      return;
+    case "tool_result": {
+      const done = toolView(ev.entry);
+      if (view.pendingTool?.isConnected) view.pendingTool.replaceWith(done); else addToTurn(done);
+      view.pendingTool = null;
+      if (ev.entry.status !== "declined") view.tools++;
+      setLive("Thinking");
+      scrollDown();
+      return;
+    }
+    case "confirm":
+      addToTurn(approvalCard(ev.request));
+      setLive("Waiting for you");
+      if (!replay) scrollDown(true);
+      return;
+    case "confirm_done": {
+      const card = view.cards[ev.id];
+      if (card) {
+        card.classList.add("done");
+        card.querySelector(".result").textContent = ev.approved ? "approved" : "declined";
+        setTimeout(() => card.remove(), replay ? 0 : 500);
+      }
+      setLive(ev.approved ? "Working" : "Thinking");
+      return;
+    }
+    case "note":
+      addToTurn(h("div", { class: `note ${ev.level}` }, ev.text));
+      return;
+    case "usage":
+      setUsage(ev);
+      return;
+    case "run_end": {
+      closeThought(at);
+      clearInterval(view.clock);
+      view.live?.remove();
+      view.live = null;
+      if (view.turn) {
+        const label = ev.status === "stopped" ? "stopped" : ev.status === "error" ? "failed" : null;
+        const footer = label || [ev.model, `${ev.seconds}s`, view.tools ? `${view.tools} tool${view.tools > 1 ? "s" : ""}` : null].filter(Boolean).join(" · ");
+        view.turn.append(h("div", { class: "footer", style: label ? "color:var(--warn)" : null }, footer));
+      }
+      view.turn = null;
+      view.text = view.lastText = view.pendingTool = null;
+      view.tools = 0;
+      view.phaseStart = 0;
+      if (ev.title) $("#chatTitle").textContent = view.title = ev.title;
+      setRunning(false);
+      scrollDown();
+      return;
+    }
+  }
+}
+
+function diffLines(preview) {
+  return preview.split("\n").map(line => {
+    const cls = /^(\+\+\+|---)/.test(line) ? "meta" : line.startsWith("@@") ? "hunk"
+      : line.startsWith("+") ? "add" : line.startsWith("-") ? "del" : /^\(cwd:/.test(line) ? "meta" : "";
+    return h("div", { class: cls }, line || " ");
+  });
+}
+function approvalCard(req) {
+  if (view.cards[req.id]) return view.cards[req.id];
+  const card = h("div", { class: `approve ${req.danger ? "danger" : ""}` },
+    h("div", { class: "head" }, req.title),
+    req.danger ? h("div", { class: "warn" }, "this command looks destructive - read it carefully") : null,
+    h("div", { class: "diff" }, ...diffLines(req.preview)),
+    h("div", { class: "actions" },
+      h("button", { class: "btn", onclick: () => answer(false) }, "decline"),
+      h("button", { class: "btn accent", onclick: () => answer(true) }, "approve")),
+    h("div", { class: "result" }));
+  view.cards[req.id] = card;
+  async function answer(ok) {
+    $$("button", card).forEach(b => b.disabled = true);
+    try {
+      await api.post(`/api/confirm/${req.id}`, { approve: ok });
+    } catch (e) {
+      $$("button", card).forEach(b => b.disabled = false);
+      if (e.status === 404) { card.remove(); return; }
+      fail(e);
+    }
+  }
+  return card;
+}
+
+/* ---------- mode, model, attachments ---------- */
+function setMode(m) {
+  document.documentElement.dataset.mode = m;
+  const name = m[0].toUpperCase() + m.slice(1);
+  $("#modePill").textContent = name;
+  $("#boxLabel").textContent = name;
+}
+$("#modePill").addEventListener("click", async () => {
+  // From what's on screen, so quick taps step through the modes.
+  const next = MODES[(MODES.indexOf(document.documentElement.dataset.mode || "build") + 1) % 3];
+  setMode(next);
+  toast({ build: "Build: can edit files and run commands", ask: "Ask: read-only answers", plan: "Plan: read-only, writes a plan" }[next]);
+  try { applyState(await api.patch("/api/state", { mode: next })); } catch (e) { setMode(S.server.mode); fail(e); }
+});
+async function modelSheet() {
+  let res;
+  try { res = await api.get("/api/models"); } catch (e) { return fail(e); }
+  openSheet(`model · installed on ${S.server.computer}`, res.models.length ? res.models.map(name =>
+    h("button", { class: "opt", onclick: async () => {
+      closeOverlays();
+      try {
+        applyState(await api.patch("/api/state", { model: name }));
+        toast(S.server.running ? `${name} from the next message` : `using ${name}`);
+      } catch (e) { fail(e); }
+    } },
+      h("span", { class: "grow mono" }, name),
+      name === res.current ? h("span", { class: "check" }, "✓") : null))
+    : [h("div", { class: "empty" }, "no models found\ninstall one on your PC with: ollama pull qwen3.5:4b")]);
+}
+$("#modelChip").addEventListener("click", modelSheet);
+$("#settingsModel").addEventListener("click", modelSheet);
+
+$("#attachBtn").addEventListener("click", async () => {
+  let files;
+  try { files = (await api.get("/api/files/recent")).files; } catch (e) { return fail(e); }
+  openSheet("attach a file · recently edited", files.map(f =>
+    h("button", { class: "opt", onclick: () => {
+      if (!S.attachments.includes(f)) S.attachments.push(f);
+      renderAttachments();
+      closeOverlays();
+    } }, h("span", { class: "grow mono" }, f), S.attachments.includes(f) ? h("span", { class: "check" }, "✓") : null)));
+});
+function renderAttachments() {
+  $("#attachments").replaceChildren(...S.attachments.map(f =>
+    h("button", { class: "chip", onclick: () => { S.attachments = S.attachments.filter(x => x !== f); renderAttachments(); } }, "@" + f + "  ×")));
+  updateSend();
+}
+
+/* ---------- composer ---------- */
+const prompt = $("#prompt");
+prompt.addEventListener("input", () => {
+  prompt.style.height = "auto";
+  prompt.style.height = Math.min(prompt.scrollHeight, 140) + "px";
+  updateSend();
+});
+const SEND_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
+const STOP_ICON = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
+let runningHere = false;
+function setRunning(on) {
+  runningHere = on;
+  const btn = $("#sendBtn");
+  btn.classList.toggle("stop", on);
+  btn.innerHTML = on ? STOP_ICON : SEND_ICON;
+  btn.setAttribute("aria-label", on ? "stop" : "send");
+  updateSend();
+}
+function updateSend() {
+  const btn = $("#sendBtn");
+  if (runningHere) { btn.disabled = false; return; }
+  btn.disabled = !prompt.value.trim() || sending;
+}
+$("#sendBtn").addEventListener("click", () => runningHere ? stop() : send());
+prompt.addEventListener("keydown", e => {
+  // Enter sends on a hardware keyboard; phones keep Enter for new lines.
+  if (e.key === "Enter" && !e.shiftKey && matchMedia("(pointer: fine)").matches) { e.preventDefault(); send(); }
+});
+
+let sending = false;
+async function send() {
+  const text = prompt.value.trim();
+  if (!text || sending || runningHere) return;
+  if (S.server?.running && S.server.running !== view.id) {
+    return toast("locoder is busy with another chat - wait or stop it first");
+  }
+  sending = true;
+  updateSend();
+  const files = S.attachments.slice();
+  try {
+    if (view.id) {
+      $("#transcript").append(userMsg(text + (files.length ? `\n\nFiles to look at: ${files.join(", ")}` : "")));
+      view.userShown = true;
+      scrollDown(true);
+      await api.post(`/api/chats/${view.id}/messages`, { text, files });
+    } else {
+      const res = await api.post("/api/chats", { text, files });
+      await openChat(res.id);
+    }
+    S.attachments = [];
+    renderAttachments();
+    prompt.value = "";
+    prompt.style.height = "auto";
+  } catch (e) {
+    if (view.userShown) { $("#transcript").lastChild?.remove(); view.userShown = false; }
+    fail(e);
+  } finally {
+    sending = false;
+    updateSend();
+  }
+}
+async function stop() {
+  if (!view?.id) return;
+  setLive("Stopping");
+  try { await api.post(`/api/chats/${view.id}/stop`); } catch (e) { fail(e); }
+}
+
+/* ---------- settings ---------- */
+const fmtTemp = t => (+t).toFixed(2).replace(/0$/, "").replace(/\.0$/, ".0");
+let tempTimer;
+$("#tempRange").addEventListener("input", e => {
+  $("#tempVal").textContent = fmtTemp(e.target.value);
+  clearTimeout(tempTimer);
+  tempTimer = setTimeout(() => api.patch("/api/state", { temperature: +e.target.value }).then(applyState).catch(fail), 400);
+});
+if (!Android) { $("#notifyTitle").hidden = true; $("#notifyGroup").hidden = true; }
+$("#notifySwitch").classList.toggle("on", S.notify);
+$("#notifySwitch").addEventListener("click", e => {
+  S.notify = !S.notify;
+  store.set("notify", S.notify ? "on" : "off");
+  e.currentTarget.classList.toggle("on", S.notify);
+  Android?.setNotify?.(S.notify);
+  if (S.notify) Android?.requestPermission?.();
+  toast(S.notify ? "notifications on" : "notifications off");
+});
+$("#confirmSwitch").addEventListener("click", () => {
+  if (!S.server.yolo) {
+    dialog({ title: "turn on yolo mode?", text: "locoder will edit files and run commands on your PC without asking, until locoder serve restarts.", okLabel: "turn on yolo", danger: true,
+      onOk: () => api.patch("/api/state", { yolo: true }).then(st => { applyState(st); toast("yolo mode on"); }).catch(fail) });
+  } else {
+    api.patch("/api/state", { yolo: false }).then(applyState).catch(fail);
+  }
+});
+$("#unpairBtn").addEventListener("click", () => dialog({
+  title: "unpair this phone?", text: "You'll need a new code from locoder serve to connect again.", okLabel: "unpair", danger: true,
+  onOk: async () => {
+    try { await api.post("/api/unpair"); } catch {}
+    unpaired();
+  },
+}));
+
+/* ---------- Android hooks ---------- */
+// Back button: true if handled here, false lets the app close.
+window.onAndroidBack = function () {
+  if ($("#sheet").classList.contains("show") || $("#dialog").classList.contains("show")) {
+    closeOverlays();
+    return true;
+  }
+  if (current() === "chat" || current() === "settings") {
+    show("list");
+    loadChats();
+    return true;
+  }
+  return false;
+};
+// Tapping a notification opens its chat.
+window.locoderOpenChat = function (id) {
+  if (api.key && id) openChat(id);
+};
+
+/* ---------- go ---------- */
+setMode("build");
+if (api.key && api.base) start(); else showPair();
+</script>
+</body>
+</html>

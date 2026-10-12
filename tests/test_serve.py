@@ -1,0 +1,250 @@
+"""``locoder serve``: pairing, the API over real HTTP, and the event stream,
+with a scripted model standing in for Ollama."""
+
+from __future__ import annotations
+
+import json
+import threading
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+from typing import Any, Optional
+
+import pytest
+
+from locoder.providers.base import Message, ToolCall
+from locoder.serve import hub as hub_module
+from locoder.serve.hub import Hub
+from locoder.serve.pairing import CODE_TTL, MAX_CODE_ATTEMPTS, Pairing
+from locoder.serve.server import LocoderServer
+from locoder.serve.transcript import to_entries
+from test_agent_loop import ScriptedProvider
+
+# -- pairing --------------------------------------------------------------------
+
+
+class Clock:
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def test_code_works_once_and_key_is_stored_hashed(tmp_path: Path):
+    store = tmp_path / "devices.json"
+    pairing = Pairing(store)
+    code = pairing.current_code()
+
+    key = pairing.pair(code, "Pixel")
+    assert key and pairing.check(key).name == "Pixel"
+    assert pairing.pair(code, "again") is None  # used up
+    assert key not in store.read_text()
+    assert Pairing(store).check(key) is not None  # survives a restart
+    assert pairing.check("nope") is None and pairing.check(None) is None
+
+
+def test_code_expires_and_wrong_guesses_burn_it(tmp_path: Path):
+    clock = Clock()
+    pairing = Pairing(tmp_path / "d.json", clock=clock)
+    code = pairing.current_code()
+    clock.now += CODE_TTL + 1
+    assert pairing.pair(code, "late") is None
+
+    code = pairing.current_code()
+    wrong = f"{(int(code) + 1) % 1_000_000:06d}"
+    for _ in range(MAX_CODE_ATTEMPTS):
+        assert pairing.pair(wrong, "guess") is None
+    assert pairing.pair(code, "too late") is None  # burnt (a new code is 1-in-a-million the same)
+
+
+def test_unpair(tmp_path: Path):
+    pairing = Pairing(tmp_path / "d.json")
+    a = pairing.pair(pairing.current_code(), "a")
+    b = pairing.pair(pairing.current_code(), "b")
+    pairing.unpair(a)
+    assert pairing.check(a) is None and pairing.check(b) is not None
+    assert pairing.unpair_all() == 1 and pairing.check(b) is None
+
+
+# -- transcript -----------------------------------------------------------------
+
+
+def test_saved_messages_become_phone_entries():
+    call = ToolCall(id="c1", name="run_command", arguments={"command": "pytest"})
+    entries = to_entries([
+        Message(role="system", content="sys"),
+        Message(role="user", content="run the tests"),
+        Message(role="assistant", content="Running them.", tool_calls=[call]),
+        Message(role="tool", content="exit code: 1\n\n1 failed", tool_call_id="c1", name="run_command"),
+        Message(role="assistant", content="One test fails."),
+    ])
+    assert [e["type"] for e in entries] == ["user", "text", "tool", "text"]
+    assert entries[1]["narration"] is True and entries[3]["narration"] is False
+    tool = entries[2]
+    assert (tool["verb"], tool["target"], tool["summary"], tool["status"]) == ("Run", "pytest", "exit 1", "err")
+
+
+# -- the server, over HTTP --------------------------------------------------------
+
+
+def write_then_answer() -> list[Message]:
+    write = ToolCall(id="w1", name="write_file", arguments={"path": "hello.txt", "content": "hi\n"})
+    return [
+        Message(role="assistant", content="I'll create it.", tool_calls=[write]),
+        Message(role="assistant", content="Created **hello.txt**."),
+    ]
+
+
+class Client:
+    def __init__(self, base: str) -> None:
+        self.base = base
+        self.key: Optional[str] = None
+
+    def call(self, method: str, path: str, body: Optional[dict] = None) -> tuple[int, Any]:
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(self.base + path, data=data, method=method)
+        if data is not None:
+            req.add_header("Content-Type", "application/json")
+        if self.key:
+            req.add_header("Authorization", f"Bearer {self.key}")
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return resp.status, json.loads(resp.read() or b"{}")
+        except urllib.error.HTTPError as exc:
+            return exc.code, json.loads(exc.read() or b"{}")
+
+
+@pytest.fixture
+def served(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(hub_module, "record_project", lambda root: None)
+    monkeypatch.setattr(hub_module, "recent_projects", lambda current, limit=6: [])
+    project = tmp_path / "project"
+    project.mkdir()
+    replies = write_then_answer()
+
+    def provider_factory(**kwargs):
+        provider = ScriptedProvider(replies)
+        provider.model = kwargs["model"]
+        return provider
+
+    hub = Hub(project, provider_factory=provider_factory)
+    pairing = Pairing(tmp_path / "devices.json")
+    server = LocoderServer(("127.0.0.1", 0), hub, pairing)
+    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
+    thread.start()
+    client = Client(f"http://127.0.0.1:{server.server_address[1]}")
+    yield client, hub, pairing, project
+    server.shutdown()
+    server.server_close()
+
+
+def wait_for(hub: Hub, type_: str, since: int = 0, timeout: float = 5.0) -> dict[str, Any]:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        for event in hub.events_after(since, timeout=0.2) or []:
+            if event["type"] == type_:
+                return event
+    raise AssertionError(f"no {type_} event")
+
+
+def test_api_needs_a_paired_key(served):
+    client, hub, pairing, _ = served
+    assert client.call("GET", "/api/hello")[1]["app"] == "locoder"
+    assert client.call("GET", "/api/chats")[0] == 401
+    assert client.call("POST", "/api/pair", {"code": "000000x"})[0] == 403
+
+    status, body = client.call("POST", "/api/pair", {"code": pairing.current_code(), "device": "test"})
+    assert status == 200 and body["key"]
+    client.key = body["key"]
+    assert client.call("GET", "/api/chats") == (200, {"chats": [], "project": hub.project_info()})
+
+
+def test_a_whole_chat_from_the_phone(served):
+    client, hub, pairing, project = served
+    client.key = client.call("POST", "/api/pair", {"code": pairing.current_code()})[1]["key"]
+
+    status, body = client.call("POST", "/api/chats", {"text": "make hello.txt"})
+    assert status == 200
+    chat = body["id"]
+
+    # The write waits for the phone's OK.
+    confirm = wait_for(hub, "confirm")["request"]
+    assert confirm["title"].startswith("Create") or "hello.txt" in confirm["title"]
+    assert client.call("POST", "/api/chats", {"text": "another"})[0] == 409  # one task at a time
+    opened = client.call("GET", f"/api/chats/{chat}")[1]
+    assert opened["live"]["pending"][0]["id"] == confirm["id"]
+    assert opened["entries"] == [{"type": "user", "text": "make hello.txt"}]
+
+    assert client.call("POST", f"/api/confirm/{confirm['id']}", {"approve": True})[0] == 200
+    end = wait_for(hub, "run_end")
+    assert end["status"] == "done" and end["preview"] == "Created hello.txt."
+    assert (project / "hello.txt").read_text() == "hi\n"
+
+    chats = client.call("GET", "/api/chats")[1]["chats"]
+    assert [c["title"] for c in chats] == ["make hello.txt"]
+    entries = client.call("GET", f"/api/chats/{chat}")[1]["entries"]
+    assert [e["type"] for e in entries] == ["user", "text", "tool", "text"]
+    assert entries[2]["verb"] == "Write" and entries[2]["status"] == "ok"
+
+    assert client.call("PATCH", f"/api/chats/{chat}", {"title": "  greeting   file "})[1]["title"] == "greeting file"
+    assert client.call("GET", "/api/chats")[1]["chats"][0]["title"] == "greeting file"
+    assert client.call("DELETE", f"/api/chats/{chat}")[0] == 200
+    assert client.call("GET", "/api/chats")[1]["chats"] == []
+    assert client.call("GET", f"/api/chats/{chat}")[0] == 404
+
+
+def test_stop_declines_the_waiting_approval(served):
+    client, hub, pairing, project = served
+    client.key = client.call("POST", "/api/pair", {"code": pairing.current_code()})[1]["key"]
+    chat = client.call("POST", "/api/chats", {"text": "make hello.txt"})[1]["id"]
+    wait_for(hub, "confirm")
+    client.call("POST", f"/api/chats/{chat}/stop")
+    assert wait_for(hub, "run_end")["status"] == "stopped"
+    assert not (project / "hello.txt").exists()
+    assert hub.run is None and hub.pending == {}
+
+
+def test_settings_and_bad_ids(served):
+    client, hub, pairing, project = served
+    client.key = client.call("POST", "/api/pair", {"code": pairing.current_code()})[1]["key"]
+    state = client.call("PATCH", "/api/state", {"mode": "plan", "model": "other:1b", "yolo": True})[1]
+    assert (state["mode"], state["model"], state["yolo"]) == ("plan", "other:1b", True)
+    assert "other:1b" in (project / ".locoder" / "config.yaml").read_text()
+    assert client.call("PATCH", "/api/state", {"mode": "nope"})[0] == 400
+    assert client.call("GET", "/api/chats/..%2F..%2Fsecret")[0] == 404
+    assert client.call("GET", "/api/models")[1]["models"] == ["fake"]
+    assert client.call("GET", "/../pyproject.toml")[0] == 404
+
+
+def test_event_stream_replays_from_seq(served):
+    client, hub, pairing, _ = served
+    client.key = client.call("POST", "/api/pair", {"code": pairing.current_code()})[1]["key"]
+    first = hub.publish("note", text="one")
+    hub.publish("note", text="two")
+
+    req = urllib.request.Request(f"{client.base}/api/events?since={first['seq']}",
+                                 headers={"Authorization": f"Bearer {client.key}"})
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        assert resp.headers["Content-Type"].startswith("text/event-stream")
+        lines = []
+        while len(lines) < 2:
+            line = resp.readline().decode().strip()
+            if line.startswith("data: "):
+                lines.append(json.loads(line[6:]))
+    assert lines[0]["type"] == "hello"
+    assert lines[1]["text"] == "two"
+
+
+def test_renamed_title_survives_more_messages(tmp_path: Path):
+    from locoder.session import SessionStore
+
+    store = SessionStore(tmp_path)
+    store.save([Message(role="system", content="s"), Message(role="user", content="first")])
+    store.rename(store.path, "my title")
+    again = SessionStore(tmp_path)
+    messages = again.resume(store.path)
+    again.save(messages + [Message(role="assistant", content="more")])
+    assert SessionStore._summarize(store.path).title == "my title"
+    assert again.chat_path("../x") is None and again.chat_path(store.path.stem) == store.path

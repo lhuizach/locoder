@@ -13,13 +13,13 @@ android {
         // 34, not 35: Android 15 forces edge-to-edge for apps targeting 35,
         // which the WebView layout doesn't handle yet.
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0-prototype"
+        versionCode = 2
+        versionName = "0.2.0"
     }
 
-    // The web app is the single source of truth: package mobile/prototype
-    // as-is (index.html + fonts/) instead of keeping a copy here.
-    sourceSets["main"].assets.srcDirs("../../prototype")
+    // The web app is the single source of truth: package the one
+    // `locoder serve` serves (index.html + fonts/) instead of keeping a copy.
+    sourceSets["main"].assets.srcDirs("../../../locoder/serve/web")
 
     buildTypes {
         release {

@@ -39,6 +39,28 @@ limits (HTTP 429) are retried automatically for waits of up to 30 seconds.
 (or `--yolo`); a project's config can't set them, since that file may come with
 a cloned repo.
 
+## From your phone
+
+```
+locoder serve
+```
+
+runs locoder in the current folder behind a small server on your local
+network and prints a 6-digit pairing code. Then either:
+
+- install the Android app (`mobile/android`, `gradlew assembleDebug`): it
+  finds the PC on your Wi-Fi, or type the address `locoder serve` shows; or
+- open that address (`http://<your-pc>:8765`) in your phone's browser.
+
+Enter the code once; the phone gets its own key. Chats, approvals, mode,
+model and project switching all work from the phone, and the chats are the
+same `.locoder/sessions` the CLI uses. The Android app notifies you when a
+task needs your OK (with Approve / Decline right on the notification) or
+finishes. Nothing leaves your network; for use away from home put both
+devices on Tailscale. `locoder serve --unpair-all` forgets every phone.
+
+On Windows, allow Python on private networks when the firewall asks.
+
 ## Slash commands
 
 - `/help` - list slash commands
@@ -59,3 +81,5 @@ a cloned repo.
 - `locoder/context.py` - token accounting and history compaction
 - `locoder/session.py` - per-project `.locoder/` session persistence
 - `locoder/sandbox.py` - path containment for file tools
+- `locoder/serve/` - `locoder serve`: pairing, the HTTP API + event stream, and the phone web app (`web/`)
+- `mobile/android/` - the Android app (a WebView around `locoder/serve/web` plus notifications)

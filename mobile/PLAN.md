@@ -3,7 +3,20 @@
 Code with locoder from your phone. The model, your files and every command
 stay on your PC; the phone is a remote screen and keyboard.
 
-The clickable prototype is `prototype/index.html` (fake data, scripted AI).
+Status: built. `locoder serve` (locoder/serve/), the web app
+(locoder/serve/web/index.html) and the Android app (mobile/android) work end
+to end. The original clickable prototype (fake data, scripted AI) is kept in
+`prototype/` for reference.
+
+What changed from the sketch below while building it:
+- Live events are server-sent events over a streaming GET
+  (`/api/events?since=<seq>`), not a WebSocket - standard library only, and
+  a phone that drops off replays what it missed by sequence number.
+- No QR code yet: the Android app finds the PC by UDP broadcast ("locoder?"
+  on the serve port), or you type the address; then the 6-digit code.
+- `PATCH /api/state {mode, model, temperature, yolo}`; new chats are
+  `POST /api/chats {text}`, which creates the chat and starts the task.
+- One task at a time per PC (a local model answers one request at once).
 
 ## Pieces
 
@@ -63,9 +76,7 @@ push servers involved, so it stays local.
 
 ## Build order
 
-1. `locoder serve` + pairing + the API above, with tests (no phone needed -
-   drive it with a test client).
-2. The web app wired to the API; usable from the phone browser.
-3. Android wrapper: WebView, QR scanner, encrypted key storage, APK.
-4. Extras: push notification when a long task finishes or needs approval,
-   voice input, offline banner when the PC is asleep.
+1. `locoder serve` + pairing + the API above, with tests. (done)
+2. The web app wired to the API; usable from the phone browser. (done)
+3. Android wrapper: WebView, discovery, notifications with Approve/Decline. (done)
+4. Next: QR pairing, voice input, a key store backed by Android Keystore.

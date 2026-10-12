@@ -40,6 +40,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+    if argv[:1] == ["serve"]:
+        from locoder.serve import serve_main
+
+        return serve_main(argv[1:])
+
     parser = build_arg_parser()
     args = parser.parse_args(argv)
 

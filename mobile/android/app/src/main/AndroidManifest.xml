@@ -1,17 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Loads the font from Google if the bundled copy is missing, and will
-         reach `locoder serve` on the PC once the app is wired up. -->
+    <!-- Talks to `locoder serve` on your PC, over your own network. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- "a task needs your approval" / "a task finished" (asked for on Android 13+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- WatchService: keeps following a running task after you leave the app -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
+    <!-- usesCleartextTraffic: the PC is reached by its local address over
+         plain HTTP (there's no certificate for 192.168.x.x); every request
+         carries the pairing key, and nothing goes past your network. -->
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="locoder"
         android:supportsRtl="true"
+        android:usesCleartextTraffic="true"
         android:theme="@style/Theme.Locoder">
         <activity
             android:name=".MainActivity"
@@ -24,5 +30,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".WatchService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <receiver
+            android:name=".ActionReceiver"
+            android:exported="false" />
     </application>
 </manifest>
