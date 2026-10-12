@@ -48,6 +48,11 @@ class Bridge(private val activity: Activity, private val webView: WebView) {
     }
 
     @JavascriptInterface
+    fun setRemote(url: String) {
+        prefs.remote = url
+    }
+
+    @JavascriptInterface
     fun clearPairing() {
         prefs.clear()
         WatchService.stop(activity)

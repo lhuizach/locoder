@@ -1,14 +1,16 @@
 """The pairing QR code ``locoder serve`` prints.
 
-It holds a plain link, ``http://<pc>:<port>/#pair=<code>``: a phone's camera
-app opens it in the browser, which pairs straight away, and the Android app's
-scanner reads the address and code out of it. The code sits after ``#`` so
-it's never sent in a request.
+It holds a plain link, ``http://<pc>:<port>/#pair=<code>&k=<secret>&r=<tunnel>``:
+a phone's camera app opens it in the browser, which pairs straight away, and
+the Android app's scanner reads it all out of it. With a tunnel, ``k`` (the
+code's one-time pairing secret) lets the app pair through it encrypted, and
+``r`` is where. Everything sits after ``#``, so it's never sent in a request.
 """
 
 from __future__ import annotations
 
-from urllib.parse import parse_qs, urlparse
+import base64
+from urllib.parse import parse_qs, quote, urlparse
 
 import segno
 from rich.text import Text
@@ -17,8 +19,11 @@ DARK = "#000000"
 LIGHT = "#ffffff"
 
 
-def pair_url(address: str, port: int, code: str) -> str:
-    return f"http://{address}:{port}/#pair={code}"
+def pair_url(address: str, port: int, code: str, *, secret: bytes = b"", remote: str | None = None) -> str:
+    url = f"http://{address}:{port}/#pair={code}"
+    if remote and secret:
+        url += "&k=" + base64.urlsafe_b64encode(secret).decode().rstrip("=") + "&r=" + quote(remote, safe=":/")
+    return url
 
 
 def parse_pair_url(url: str) -> tuple[str, str] | None:

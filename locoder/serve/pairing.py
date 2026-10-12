@@ -3,8 +3,12 @@
 ``locoder serve`` shows a 6-digit code. A phone that sends it back gets a
 long random key, which it then sends with every request. The code works
 once, expires after a few minutes, and is thrown away after a few wrong
-guesses. Only a hash of each key is kept on disk
-(``~/.locoder/devices.json``), so that file is no use to anyone who reads it.
+guesses. On disk (``~/.locoder/devices.json``) each phone has only a hash
+of its key - enough to check it, not to use it - and its end-to-end
+encryption secret (see e2e.py), which only matters to this PC.
+
+Each code also comes with a random pairing secret, shown only in the QR code,
+which lets a phone pair through the encrypted tunnel.
 """
 
 from __future__ import annotations
@@ -17,6 +21,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
+
+from locoder.serve.e2e import device_secret, pair_id
 
 DEVICES_FILE = Path.home() / ".locoder" / "devices.json"
 CODE_TTL = 10 * 60  # seconds
@@ -33,6 +39,11 @@ class Device:
     name: str
     paired_at: float
     last_seen: float = 0.0
+    secret: str = ""  # hex end-to-end secret; "" for phones paired before encryption
+
+    @property
+    def id(self) -> str:
+        return self.key_hash[:32]
 
 
 class Pairing:
@@ -49,6 +60,7 @@ class Pairing:
         self._lock = threading.Lock()
         self.devices: list[Device] = self._load()
         self.code = ""
+        self.pair_secret = b""
         self._code_expires = 0.0
         self._attempts = 0
         self.new_code()
@@ -57,6 +69,7 @@ class Pairing:
 
     def new_code(self) -> str:
         self.code = f"{secrets.randbelow(1_000_000):06d}"
+        self.pair_secret = secrets.token_bytes(32)
         self._code_expires = self.clock() + CODE_TTL
         self._attempts = 0
         self.on_new_code(self.code)
@@ -83,7 +96,8 @@ class Pairing:
             key = secrets.token_urlsafe(32)
             now = self.clock()
             name = (device_name or "phone").strip()[:60] or "phone"
-            self.devices.append(Device(_hash(key), name, paired_at=now, last_seen=now))
+            self.devices.append(Device(_hash(key), name, paired_at=now, last_seen=now,
+                                       secret=device_secret(key).hex()))
             self._save()
             self.new_code()  # one use only
             return key
@@ -97,13 +111,35 @@ class Pairing:
         for device in self.devices:
             if secrets.compare_digest(device.key_hash, wanted):
                 device.last_seen = self.clock()
+                if not device.secret:
+                    # Paired before encryption existed: the key is right here, so catch up.
+                    with self._lock:
+                        device.secret = device_secret(key).hex()
+                        self._save()
                 return device
         return None
 
-    def unpair(self, key: str) -> None:
+    def device(self, id_: str) -> Optional[Device]:
+        """The phone with this end-to-end id, if it has a secret."""
+        for device in self.devices:
+            if device.secret and secrets.compare_digest(device.id, str(id_)):
+                device.last_seen = self.clock()
+                return device
+        return None
+
+    def pair_secret_for(self, pid: str) -> Optional[bytes]:
+        """The current code's pairing secret, if ``pid`` names it and it hasn't expired."""
         with self._lock:
-            wanted = _hash(key)
-            self.devices = [d for d in self.devices if d.key_hash != wanted]
+            if self.clock() >= self._code_expires:
+                return None
+            return self.pair_secret if secrets.compare_digest(pair_id(self.pair_secret), str(pid)) else None
+
+    def unpair(self, key: str) -> None:
+        self.unpair_device(_hash(key)[:32])
+
+    def unpair_device(self, id_: str) -> None:
+        with self._lock:
+            self.devices = [d for d in self.devices if d.id != id_]
             self._save()
 
     def unpair_all(self) -> int:
@@ -121,12 +157,14 @@ class Pairing:
         devices = []
         for d in data if isinstance(data, list) else []:
             try:
-                devices.append(Device(str(d["key_hash"]), str(d.get("name", "phone")), float(d.get("paired_at", 0))))
+                devices.append(Device(str(d["key_hash"]), str(d.get("name", "phone")), float(d.get("paired_at", 0)),
+                                      secret=str(d.get("secret", ""))))
             except (KeyError, TypeError, ValueError):
                 continue
         return devices
 
     def _save(self) -> None:
         self.store.parent.mkdir(parents=True, exist_ok=True)
-        data = [{"key_hash": d.key_hash, "name": d.name, "paired_at": d.paired_at} for d in self.devices]
+        data = [{"key_hash": d.key_hash, "name": d.name, "paired_at": d.paired_at, "secret": d.secret}
+                for d in self.devices]
         self.store.write_text(json.dumps(data, indent=2), encoding="utf-8")

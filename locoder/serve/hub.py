@@ -66,6 +66,8 @@ class Hub:
         self._events: deque[dict[str, Any]] = deque(maxlen=KEEP_EVENTS)
         self._seq = 0
         self.run: Optional[Run] = None
+        # The encrypted tunnel's public address, when there is one (tunnel.py).
+        self.remote: Optional[str] = None
         self.pending: dict[str, ConfirmRequest] = {}
         self._open_project(project_root)
         self.yolo = self.config.yolo
@@ -321,6 +323,7 @@ class Hub:
                 "running": run.chat if run else None,
                 "pending": [p.public() for p in self.pending.values()],
                 "seq": self._seq,
+                "remote": self.remote,
             }
 
     def update(self, changes: dict[str, Any]) -> dict[str, Any]:

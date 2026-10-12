@@ -1,8 +1,9 @@
 """``locoder serve``: use locoder from your phone.
 
 Runs the same agent as the CLI behind a small HTTP API on your local
-network, plus the phone web app. Pair a phone with the 6-digit code it
-prints; see mobile/PLAN.md for the whole design.
+network, plus the phone web app. Pair a phone with the QR code or 6-digit
+code it prints. With --tunnel the app can also reach it from anywhere,
+end-to-end encrypted, through Cloudflare. See mobile/PLAN.md for the design.
 """
 
 from __future__ import annotations
@@ -30,6 +31,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="address to listen on (default: every network this PC is on)")
     parser.add_argument("--address",
                         help="the address phones should use, if the one locoder picks (first listed) is wrong")
+    parser.add_argument("--tunnel", action="store_true",
+                        help="also reachable from anywhere through Cloudflare (needs cloudflared), end-to-end encrypted")
+    parser.add_argument("--tunnel-url",
+                        help="the public address of a Cloudflare tunnel you run yourself, pointing at this server")
     parser.add_argument("--model", help="override the model name from config")
     parser.add_argument("--provider", help="override provider kind")
     parser.add_argument("--base-url", help="override the backend base URL")
@@ -71,7 +76,8 @@ def serve_main(argv: Optional[list[str]] = None) -> int:
         if ready.is_set():
             console.print()
             console.print(Text("new pairing code (the last one was used or expired)", style=MUTED))
-            console.print(_pairing_block(addresses[0], args.port, code, fancy=_can_show_qr(console)))
+            console.print(_pairing_block(addresses[0], args.port, code, secret=pairing.pair_secret,
+                                         remote=hub.remote, fancy=_can_show_qr(console)))
             console.print()
 
     def log(msg: str) -> None:
@@ -89,7 +95,16 @@ def serve_main(argv: Optional[list[str]] = None) -> int:
     addresses[:] = lan_addresses() if args.host in ("0.0.0.0", "") else [args.host]
     if args.address:
         addresses[:] = [args.address, *[a for a in addresses if a != args.address]]
-    _banner(console, hub, addresses, args.port, pairing.current_code(), len(pairing.devices))
+
+    tunnel = None
+    if args.tunnel_url:
+        hub.remote = args.tunnel_url.rstrip("/")
+    elif args.tunnel:
+        tunnel = _start_tunnel(console, args.port, log)
+        hub.remote = tunnel.url if tunnel else None
+
+    _banner(console, hub, addresses, args.port, pairing.current_code(), len(pairing.devices),
+            secret=pairing.pair_secret)
     ready.set()
 
     # Expired codes are replaced (and the new one shown) without waiting for a phone to ask.
@@ -104,9 +119,30 @@ def serve_main(argv: Optional[list[str]] = None) -> int:
         pass
     finally:
         stop.set()
+        if tunnel:
+            tunnel.stop()
         server.server_close()
         console.print(Text("stopped", style=MUTED))
     return 0
+
+
+def _start_tunnel(console: Console, port: int, log):
+    from locoder.serve.tunnel import DOWNLOAD_PAGE, BIN_DIR, QuickTunnel, find_cloudflared
+
+    binary = find_cloudflared()
+    if binary is None:
+        console.print(Text.assemble(
+            ("no tunnel: cloudflared isn't installed. ", "#d7a84a"),
+            (f"Get cloudflared-windows-amd64.exe from {DOWNLOAD_PAGE}, save it as "
+             f"{BIN_DIR / 'cloudflared.exe'}, and run locoder serve --tunnel again.", MUTED)))
+        return None
+    console.print(Text("starting the encrypted tunnel...", style=MUTED))
+    tunnel = QuickTunnel(port, log=log)
+    if tunnel.start(binary) is None:
+        tunnel.stop()
+        console.print(Text("no tunnel: cloudflared didn't come up (no internet?) - home Wi-Fi only for now", style="#d7a84a"))
+        return None
+    return tunnel
 
 
 def _fancy(console: Console) -> bool:
@@ -119,7 +155,8 @@ def _can_show_qr(console: Console) -> bool:
     return _fancy(console) and console.color_system is not None
 
 
-def _banner(console: Console, hub, addresses: list[str], port: int, code: str, paired: int) -> None:
+def _banner(console: Console, hub, addresses: list[str], port: int, code: str, paired: int,
+            *, secret: bytes = b"") -> None:
     console.print()
     if _fancy(console):
         lockup = Table.grid(padding=(0, 3))
@@ -138,8 +175,14 @@ def _banner(console: Console, hub, addresses: list[str], port: int, code: str, p
     for addr in addresses[1:]:
         # VPN / VM / WSL adapters: usually not the one the phone can see.
         console.print(Text.assemble((f"  http://{addr}:{port}", SECONDARY), ("  other network", FAINT)))
+    if hub.remote:
+        console.print()
+        console.print(Text("anywhere else, the app connects through", style=MUTED))
+        console.print(Text.assemble((f"  {hub.remote}", f"bold {FG}"),
+                                    ("  end-to-end encrypted, Cloudflare can't read it", FAINT)))
     console.print()
-    console.print(_pairing_block(addresses[0], port, code, fancy=_can_show_qr(console)))
+    console.print(_pairing_block(addresses[0], port, code, secret=secret, remote=hub.remote,
+                                 fancy=_can_show_qr(console)))
     if paired:
         console.print(Text(f"{paired} phone{'s are' if paired != 1 else ' is'} already paired", style=MUTED))
     console.print()
@@ -147,7 +190,8 @@ def _banner(console: Console, hub, addresses: list[str], port: int, code: str, p
     console.print()
 
 
-def _pairing_block(address: str, port: int, code: str, *, fancy: bool = True):
+def _pairing_block(address: str, port: int, code: str, *, secret: bytes = b"", remote: Optional[str] = None,
+                   fancy: bool = True):
     """The QR code, with the code to type next to it."""
     if not fancy:
         return Text.assemble(("pairing code  ", MUTED), (f"{code[:3]} {code[3:]}", f"bold {ACCENT}"),
@@ -161,5 +205,5 @@ def _pairing_block(address: str, port: int, code: str, *, fancy: bool = True):
     block = Table.grid(padding=(0, 3))
     block.add_column(no_wrap=True)
     block.add_column(vertical="middle")
-    block.add_row(qr_text(pair_url(address, port, code)), info)
+    block.add_row(qr_text(pair_url(address, port, code, secret=secret, remote=remote)), info)
     return block

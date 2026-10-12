@@ -301,3 +301,133 @@ def test_no_qr_without_colours():
     out.print(_pairing_block("1.2.3.4", 8765, "123456", fancy=False))
     assert "123 456" in out.file.getvalue() and "▀" not in out.file.getvalue()
     assert _can_show_qr(Console(file=io.StringIO(), color_system="truecolor", force_terminal=True))
+
+
+# -- end-to-end encryption (the tunnel) ---------------------------------------------
+
+
+class SealedClient:
+    """Talks to /api/e2e the way the app does over the tunnel."""
+
+    def __init__(self, client: Client) -> None:
+        self.client = client
+        self.channel = None
+        self.sender = ""
+        self.pairing = False
+
+    def post(self, envelope: dict, headers: Optional[dict] = None) -> tuple[int, Any]:
+        req = urllib.request.Request(self.client.base + "/api/e2e", data=json.dumps(envelope).encode(),
+                                     method="POST", headers={"Content-Type": "application/json", **(headers or {})})
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return resp.status, json.loads(resp.read())
+        except urllib.error.HTTPError as exc:
+            return exc.code, json.loads(exc.read() or b"{}")
+
+    def call(self, method: str, path: str, body: Any = None, *, t: Optional[float] = None) -> tuple[int, Any]:
+        from locoder.serve.e2e import RESPONSE, unb64
+
+        message = {"m": method, "p": path, "b": body, "t": (time.time() if t is None else t) * 1000}
+        envelope = self.channel.seal_request(message, self.sender, pair=self.pairing)
+        status, data = self.post(envelope, {"Cf-Ray": "test"})  # as if through Cloudflare
+        if status != 200:
+            return status, data
+        reply = self.channel.open(data, RESPONSE, unb64(envelope["n"]))
+        return reply["s"], reply["b"]
+
+
+def pair_sealed(client: Client, pairing: Pairing) -> SealedClient:
+    from locoder.serve.e2e import Channel, device_id, device_secret, pair_id
+
+    pairing.current_code()
+    sealed = SealedClient(client)
+    sealed.channel, sealed.sender, sealed.pairing = Channel(pairing.pair_secret), pair_id(pairing.pair_secret), True
+    status, body = sealed.call("POST", "/api/pair", {"code": pairing.code, "device": "remote phone"})
+    assert status == 200, body
+    key = body["key"]
+    sealed.channel, sealed.sender, sealed.pairing = Channel(device_secret(key)), device_id(key), False
+    return sealed
+
+
+def test_pairing_and_calls_through_the_tunnel_are_sealed(served):
+    client, hub, pairing, project = served
+    sealed = pair_sealed(client, pairing)
+    assert pairing.devices[-1].name == "remote phone"
+    assert sealed.call("GET", "/api/chats") == (200, {"chats": [], "project": hub.project_info()})
+    assert sealed.call("PATCH", "/api/state", {"mode": "ask"})[1]["mode"] == "ask"
+    assert sealed.call("GET", "/api/nope")[0] == 404
+
+
+def test_sealed_requests_cant_be_replayed_tampered_or_stale(served):
+    from locoder.serve.e2e import b64, unb64
+
+    client, hub, pairing, project = served
+    sealed = pair_sealed(client, pairing)
+    envelope = sealed.channel.seal_request({"m": "GET", "p": "/api/chats", "t": time.time() * 1000}, sealed.sender)
+    assert sealed.post(envelope)[0] == 200
+    assert sealed.post(envelope)[0] == 403  # replay
+
+    envelope = sealed.channel.seal_request({"m": "GET", "p": "/api/chats", "t": time.time() * 1000}, sealed.sender)
+    broken = bytearray(unb64(envelope["c"]))
+    broken[0] ^= 1
+    assert sealed.post({**envelope, "c": b64(bytes(broken))})[0] == 403
+    assert sealed.call("GET", "/api/chats", t=time.time() - 3600)[0] == 403  # an hour old
+    assert sealed.post({**envelope, "d": "0" * 32})[0] == 401  # unknown phone
+
+
+def test_the_tunnel_only_takes_sealed_requests(served):
+    client, hub, pairing, project = served
+    client.key = client.call("POST", "/api/pair", {"code": pairing.current_code()})[1]["key"]
+    req = urllib.request.Request(client.base + "/api/chats", headers={"Authorization": f"Bearer {client.key}",
+                                                                      "Cf-Ray": "x"})
+    with pytest.raises(urllib.error.HTTPError) as err:
+        urllib.request.urlopen(req, timeout=5)
+    assert err.value.code == 403
+    page = urllib.request.urlopen(urllib.request.Request(client.base + "/", headers={"Cf-Ray": "x"}), timeout=5).read()
+    assert b"only talks to the locoder app" in page and b"<script" not in page
+
+    # A QR pairing secret works once.
+    from locoder.serve.e2e import Channel, pair_id
+
+    secret = pairing.pair_secret
+    sealed = SealedClient(client)
+    sealed.channel, sealed.sender, sealed.pairing = Channel(secret), pair_id(secret), True
+    assert sealed.call("POST", "/api/pair", {"code": pairing.code})[0] == 200
+    assert sealed.call("POST", "/api/pair", {"code": pairing.code})[0] == 403
+
+
+def test_sealed_event_stream(served):
+    from locoder.serve.e2e import EVENT, unb64
+
+    client, hub, pairing, project = served
+    sealed = pair_sealed(client, pairing)
+    first = hub.publish("note", text="one")
+    hub.publish("note", text="secret text")
+    envelope = sealed.channel.seal_request(
+        {"m": "GET", "p": f"/api/events?since={first['seq']}", "t": time.time() * 1000}, sealed.sender)
+    req = urllib.request.Request(client.base + "/api/e2e", data=json.dumps(envelope).encode(), method="POST",
+                                 headers={"Content-Type": "application/json", "Cf-Ray": "x"})
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        events, raw = [], b""
+        while len(events) < 2:
+            line = resp.readline()
+            raw += line
+            if line.startswith(b"data: "):
+                events.append(sealed.channel.open(json.loads(line[6:]), EVENT, unb64(envelope["n"])))
+    assert [e["type"] for e in events] == ["hello", "note"] and events[1]["text"] == "secret text"
+    assert b"secret text" not in raw
+
+
+def test_phones_paired_before_encryption_get_a_secret(tmp_path: Path):
+    store = tmp_path / "d.json"
+    pairing = Pairing(store)
+    key = pairing.pair(pairing.current_code(), "old")
+    data = json.loads(store.read_text())
+    data[0].pop("secret")
+    store.write_text(json.dumps(data))
+
+    old = Pairing(store)
+    assert old.device(old.devices[0].id) is None  # no secret yet
+    assert old.check(key) is not None
+    assert old.device(old.devices[0].id) is not None
+    assert json.loads(store.read_text())[0]["secret"]

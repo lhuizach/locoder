@@ -18,6 +18,7 @@ dependencies = [
     "PyYAML>=6.0",
     "tiktoken>=0.7",
     "segno>=1.5",
+    "cryptography>=42",
 ]
 
 [project.optional-dependencies]

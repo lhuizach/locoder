@@ -469,42 +469,147 @@ const store = {
   set(k, v) { try { v == null ? localStorage.removeItem("locoder." + k) : localStorage.setItem("locoder." + k, v); } catch {} },
 };
 
-/* ---------- the API ---------- */
+/* ---------- end-to-end encryption (the protocol is in locoder/serve/e2e.py) ---------- */
+const te = new TextEncoder(), td = new TextDecoder();
+const CAN_E2E = !!(window.crypto && crypto.subtle);
+function bytesToB64(bytes) {
+  let s = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+const b64ToBytes = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+const b64urlToBytes = s => b64ToBytes(s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4));
+async function hmacSha256(key, msg) {
+  const k = await crypto.subtle.importKey("raw", key, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return new Uint8Array(await crypto.subtle.sign("HMAC", k, msg));
+}
+async function sha256Hex(bytes) {
+  const d = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  return [...d].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+async function makeChannel(secret) {
+  const key = async (label, use) =>
+    crypto.subtle.importKey("raw", await hmacSha256(secret, te.encode(label)), "AES-GCM", false, [use]);
+  return { c2s: await key("c2s", "encrypt"), s2c: await key("s2c", "decrypt") };
+}
+async function sealRequest(ch, sender, message, pair = false) {
+  const nonce = crypto.getRandomValues(new Uint8Array(12));
+  const sealed = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: nonce, additionalData: te.encode("locoder-req:" + sender) },
+    ch.c2s, te.encode(JSON.stringify(message)));
+  return { envelope: { v: 1, [pair ? "pair" : "d"]: sender, n: bytesToB64(nonce), c: bytesToB64(new Uint8Array(sealed)) }, nonce };
+}
+async function openSealed(ch, label, nonce, env) {
+  const aad = new Uint8Array([...te.encode(label), ...nonce]);
+  const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64ToBytes(env.n), additionalData: aad },
+    ch.s2c, b64ToBytes(env.c));
+  return JSON.parse(td.decode(plain));
+}
+// This phone's channel, from its pairing key.
+const e2e = {
+  async forKey(key) {
+    if (this.key !== key) {
+      this.id = (await sha256Hex(te.encode(key))).slice(0, 32);
+      this.ch = await makeChannel(await hmacSha256(te.encode("locoder e2e"), te.encode(key)));
+      this.key = key;
+    }
+    return this;
+  },
+};
+
+/* ---------- the API ----------
+   Two routes to the PC: "lan" (your Wi-Fi, or the USB link) with the key in
+   a header, and "remote", through the Cloudflare tunnel, where every request
+   and reply is sealed end to end. The app picks whichever answers. */
+const apiError = (message, status) => Object.assign(new Error(message), { status });
+async function fetchWithTimeout(url, opts, ms = 10000) {
+  // A PC behind a firewall that drops packets never answers at all; give up
+  // after a while instead of waiting forever.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(url, { cache: "no-store", ...opts, signal: ctrl.signal });
+  } catch {
+    throw apiError("can't reach your PC", 0);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 const api = {
   base: IN_APP ? (store.get("server") || "") : location.origin,
   key: store.get("key"),
+  remote: IN_APP ? store.get("remote") : null,
+  route: "lan",
   async call(method, path, body) {
+    try {
+      return await this._call(method, path, body);
+    } catch (e) {
+      // Left home, or came back: if this route is down, try the other one once.
+      if (e.status === 0 && IN_APP && this.remote && this.key) {
+        const before = this.route;
+        await pickRoute();
+        if (this.route !== before) return this._call(method, path, body);
+      }
+      throw e;
+    }
+  },
+  async _call(method, path, body) {
+    if (this.route === "remote") return this._sealed(method, path, body);
     const headers = {};
     if (this.key) headers.Authorization = `Bearer ${this.key}`;
     if (body !== undefined) headers["Content-Type"] = "application/json";
-    let res;
-    // A PC behind a firewall that drops packets never answers at all; give up
-    // after a while instead of waiting forever.
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 10000);
-    try {
-      res = await fetch(this.base + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), cache: "no-store", signal: ctrl.signal });
-    } catch {
-      const err = new Error("can't reach your PC");
-      err.status = 0;
-      throw err;
-    } finally {
-      clearTimeout(timer);
-    }
+    const res = await fetchWithTimeout(this.base + path,
+      { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const err = new Error(data.error || `error ${res.status}`);
-      err.status = res.status;
       if (res.status === 401 && path !== "/api/pair") unpaired();
-      throw err;
+      throw apiError(data.error || `error ${res.status}`, res.status);
     }
     return data;
+  },
+  async _sealed(method, path, body) {
+    const me = await e2e.forKey(this.key);
+    const { envelope, nonce } = await sealRequest(me.ch, me.id, { m: method, p: path, b: body ?? null, t: Date.now() });
+    const res = await fetchWithTimeout(this.remote + "/api/e2e",
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(envelope) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (res.status === 401) unpaired();
+      throw apiError(data.error || `error ${res.status}`, res.status);
+    }
+    let reply;
+    try {
+      reply = await openSealed(me.ch, "locoder-res:", nonce, data);
+    } catch {
+      throw apiError("a reply from your PC didn't decrypt - the connection may have been tampered with", 502);
+    }
+    if (reply.s !== 200) {
+      if (reply.s === 401) unpaired();
+      throw apiError(reply.b?.error || `error ${reply.s}`, reply.s);
+    }
+    return reply.b;
   },
   get(p) { return this.call("GET", p); },
   post(p, b = {}) { return this.call("POST", p, b); },
   patch(p, b) { return this.call("PATCH", p, b); },
   del(p) { return this.call("DELETE", p); },
 };
+async function reachable(base, ms = 2500) {
+  try {
+    return (await fetchWithTimeout(base + "/api/hello", {}, ms)).ok;
+  } catch { return false; }
+}
+// Home connection when it answers, else the encrypted tunnel.
+async function pickRoute() {
+  if (!IN_APP || !api.remote || !CAN_E2E) { api.route = "lan"; return; }
+  api.route = api.base && await reachable(api.base) ? "lan" : "remote";
+}
+function setRemote(url) {
+  if (!IN_APP || !url || url === api.remote) return;
+  api.remote = url;
+  store.set("remote", url);
+  Android?.setRemote?.(url);
+}
 function normalizeServer(text) {
   let s = text.trim().replace(/\/+$/, "");
   if (!s) return "";
@@ -516,6 +621,8 @@ function normalizeServer(text) {
   } catch { return ""; }
 }
 const shortAddr = () => api.base.replace(/^https?:\/\//, "");
+const routeLabel = () => api.route === "remote"
+  ? `${api.remote.replace(/^https?:\/\//, "")} · encrypted tunnel` : shortAddr();
 
 /* ---------- the logo, from the CLI's bitmap ---------- */
 const LOGO = ["##############", "#.############", "##############", "#.############", "##############"]
@@ -646,7 +753,22 @@ function updatePairBtn() {
 }
 $("#pairBtn").addEventListener("click", () => pair(enteredCode()));
 
-async function pair(code) {
+// Pairing through the tunnel, sealed with the one-time secret from the QR code.
+async function pairRemote(code, link, device) {
+  const secret = b64urlToBytes(link.k);
+  const pid = (await sha256Hex(secret)).slice(0, 32);
+  const ch = await makeChannel(secret);
+  const { envelope, nonce } = await sealRequest(ch, pid, { m: "POST", p: "/api/pair", b: { code, device }, t: Date.now() }, true);
+  const res = await fetchWithTimeout(link.r + "/api/e2e",
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(envelope) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw apiError(data.error || `error ${res.status}`, res.status);
+  const reply = await openSealed(ch, "locoder-res:", nonce, data);
+  if (reply.s !== 200) throw apiError(reply.b?.error || `error ${reply.s}`, reply.s);
+  return reply.b;
+}
+
+async function pair(code, link = null) {
   if (pairing) return;
   $("#pairError").textContent = "";
   if (IN_APP) {
@@ -663,7 +785,15 @@ async function pair(code) {
   updatePairBtn();
   try {
     const device = Android?.deviceName?.() || (/Android/.test(navigator.userAgent) ? "Android browser" : "phone browser");
-    const res = await api.post("/api/pair", { code, device });
+    api.route = "lan";
+    let res;
+    if (IN_APP && link?.k && link?.r && CAN_E2E && !await reachable(api.base)) {
+      res = await pairRemote(code, link, device);  // not at home: through the tunnel
+      api.route = "remote";
+    } else {
+      res = await api.post("/api/pair", { code, device });
+    }
+    if (link?.r) setRemote(link.r);
     api.key = res.key;
     store.set("key", res.key);
     store.set("server", api.base);
@@ -706,6 +836,8 @@ function unpaired() {
   if (!api.key) return;
   api.key = null;
   store.set("key", null);
+  api.remote = null;
+  store.set("remote", null);
   Android?.clearPairing?.();
   toast("this phone isn't paired any more");
   showPair();
@@ -745,9 +877,11 @@ $("#searchBtn").addEventListener("click", discover);
 function parsePairLink(text) {
   try {
     const u = new URL(String(text).trim());
-    const code = new URLSearchParams(u.hash.slice(1)).get("pair") || "";
+    const params = new URLSearchParams(u.hash.slice(1));
+    const code = params.get("pair") || "";
     if (!/^https?:$/.test(u.protocol) || !/^\d{6}$/.test(code)) return null;
-    return { server: u.origin, code };
+    const remote = params.get("r") || "";
+    return { server: u.origin, code, k: params.get("k") || "", r: /^https:\/\//.test(remote) ? remote.replace(/\/+$/, "") : "" };
   } catch { return null; }
 }
 function fillCode(code) {
@@ -762,7 +896,7 @@ window.onLocoderScanned = function (text) {
   }
   $("#addrInput").value = link.server.replace(/^https?:\/\//, "");
   fillCode(link.code);
-  pair(link.code);
+  pair(link.code, link);
 };
 window.onLocoderScanFailed = function (reason) {
   $("#pairError").textContent = `couldn't scan (${reason}) - type the address and code instead`;
@@ -794,9 +928,7 @@ async function stream() {
   while (conn.running && api.key) {
     const ctrl = conn.ctrl = new AbortController();
     try {
-      const res = await fetch(`${api.base}/api/events?since=${conn.seq}`, {
-        headers: { Authorization: `Bearer ${api.key}` }, signal: ctrl.signal, cache: "no-store",
-      });
+      const { res, decode } = await openEvents(conn.seq, ctrl.signal);
       if (res.status === 401) { conn.running = false; unpaired(); return; }
       if (!res.ok) throw new Error(`events ${res.status}`);
       const reader = res.body.getReader();
@@ -815,7 +947,7 @@ async function stream() {
           buf = buf.slice(cut + 2);
           for (const line of chunk.split("\n")) {
             if (!line.startsWith("data: ")) continue;
-            try { onEvent(JSON.parse(line.slice(6))); } catch (e) { console.error(e); }
+            try { onEvent(await decode(JSON.parse(line.slice(6)))); } catch (e) { console.error(e); }
           }
         }
       }
@@ -825,8 +957,23 @@ async function stream() {
     setOnline(false);
     await sleep(conn.backoff);
     conn.backoff = Math.min(conn.backoff * 2, 8000);
+    await pickRoute();  // maybe you left home (or came back)
   }
   conn.running = false;
+}
+async function openEvents(seq, signal) {
+  if (api.route === "remote") {
+    const me = await e2e.forKey(api.key);
+    const { envelope, nonce } = await sealRequest(me.ch, me.id, { m: "GET", p: `/api/events?since=${seq}`, b: null, t: Date.now() });
+    const res = await fetch(api.remote + "/api/e2e", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(envelope), signal, cache: "no-store",
+    });
+    return { res, decode: env => openSealed(me.ch, "locoder-evt:", nonce, env) };
+  }
+  const res = await fetch(`${api.base}/api/events?since=${seq}`, {
+    headers: { Authorization: `Bearer ${api.key}` }, signal, cache: "no-store",
+  });
+  return { res, decode: async event => event };
 }
 // The server pings every 15s; a stream that has gone quiet for longer is dead
 // (Wi-Fi changed, PC slept) even if the socket hasn't noticed yet.
@@ -890,7 +1037,8 @@ function applyState(st) {
   $("#boxMeta").textContent = `${s.model} · ${s.provider}`;
   $("#projectName").textContent = s.project?.name || s.project?.label || "";
   $("#pcName").textContent = s.computer;
-  $("#pcAddr").textContent = shortAddr();
+  $("#pcAddr").textContent = routeLabel();
+  if (s.remote) setRemote(s.remote);
   $("#versionVal").textContent = s.version ? `v${s.version}` : "";
   $("#ctxVal").textContent = (s.num_ctx || 0).toLocaleString("en");
   $("#confirmSwitch").classList.toggle("on", !s.yolo);
@@ -911,7 +1059,9 @@ function tellAndroid() {
 
 async function start() {
   Android?.setPairing?.(api.base, api.key);
+  if (api.remote) Android?.setRemote?.(api.remote);
   Android?.setNotify?.(S.notify);
+  await pickRoute();
   try {
     applyState(await api.get("/api/state"));
     conn.seq = S.server.seq;
@@ -919,7 +1069,9 @@ async function start() {
   } catch (e) {
     if (e.status === 401) return;
     setOnline(false);
-    $("#bannerText").textContent = `can't reach your PC (${shortAddr()}) - is locoder serve running?`;
+    $("#bannerText").textContent = api.remote
+      ? "can't reach your PC at home or through the tunnel - is locoder serve running?"
+      : `can't reach your PC (${shortAddr()}) - is locoder serve running?`;
   }
   show("list");
   if (S.server) loadChats();

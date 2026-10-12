@@ -40,7 +40,7 @@ class WatchService : Service() {
         }
         if (!running) {
             running = true
-            worker = Thread({ watch(Api(server, key), notifications) }, "locoder-watch").apply { start() }
+            worker = Thread({ watch(Api(server, key, prefs.remote), notifications) }, "locoder-watch").apply { start() }
         }
         return START_NOT_STICKY
     }

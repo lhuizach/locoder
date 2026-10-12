@@ -23,6 +23,7 @@ from typing import Any, Callable, Optional
 from urllib.parse import parse_qs, urlparse
 
 from locoder import __version__
+from locoder.serve.e2e import EVENT, RESPONSE, Channel, E2eError, ReplayGuard
 from locoder.serve.hub import Hub, HubError
 from locoder.serve.pairing import Pairing
 
@@ -51,6 +52,7 @@ class LocoderServer(ThreadingHTTPServer):
         self.pairing = pairing
         self.log = log
         self.closing = threading.Event()
+        self.replay = ReplayGuard()
         super().__init__(address, Handler)
 
     def shutdown(self) -> None:
@@ -133,31 +135,97 @@ class Handler(BaseHTTPRequestHandler):
 
     def _dispatch(self, method: str) -> None:
         url = urlparse(self.path)
-        self.query = parse_qs(url.query)
         self._read_body()
+        self._device = None  # set when a request arrived end-to-end encrypted
+        self._seal_event = None
+        if url.path == "/api/e2e":
+            return self._e2e() if method == "POST" else self._error(405, "POST only")
+        # Through the Cloudflare tunnel (it adds these headers): only sealed
+        # requests from the app. The web app itself isn't served either, as
+        # Cloudflare could change it on the way.
+        if "Cf-Ray" in self.headers or "Cf-Connecting-Ip" in self.headers:
+            if url.path.startswith("/api/"):
+                return self._error(403, "over the internet, locoder only takes encrypted requests from its app")
+            return self._tunnel_page()
         if not url.path.startswith("/api/"):
             if method == "GET":
                 return self._static(url.path)
             return self._error(404, "not found")
+        status, data = self._call(method, url.path, url.query)
+        if data is not _STREAMED:
+            self._json(status, data)
+
+    def _call(self, method: str, path: str, query: str) -> tuple[int, Any]:
+        """Runs one API call: (status, JSON body), or _STREAMED if it wrote its own response."""
+        self.query = parse_qs(query)
         for route in ROUTES:
-            match = route.regex.match(url.path)
+            match = route.regex.match(path)
             if not match or route.method != method:
                 continue
-            if route.auth and self.server.pairing.check(self._key()) is None:
-                return self._error(401, "not paired - pair this device again")
+            if route.auth and self._device is None and self.server.pairing.check(self._key()) is None:
+                return 401, {"error": "not paired - pair this device again"}
             try:
                 result = route.handler(self, **match.groupdict())
             except HubError as exc:
-                return self._error(exc.status, str(exc))
+                return exc.status, {"error": str(exc)}
             except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
-                return None
+                return 0, _STREAMED
             except Exception as exc:  # noqa: BLE001 - one bad request shouldn't kill the server
-                self.server.log(f"error handling {method} {url.path}: {exc}")
-                return self._error(500, f"server error: {exc}")
-            if result is not _STREAMED:
-                self._json(200, {} if result is None else result)
-            return None
-        self._error(404, "no such API call")
+                self.server.log(f"error handling {method} {path}: {exc}")
+                return 500, {"error": f"server error: {exc}"}
+            return 200, ({} if result is None else result)
+        return 404, {"error": "no such API call"}
+
+    def _e2e(self) -> None:
+        """An end-to-end encrypted request (see e2e.py): unseal, run, seal the reply."""
+        pairing = self.server.pairing
+        try:
+            envelope = json.loads(self._raw or b"null")
+            if not isinstance(envelope, dict):
+                raise ValueError
+        except ValueError:
+            return self._error(400, "bad envelope")
+        pairing_request = "pair" in envelope
+        device = None
+        if pairing_request:
+            sender = str(envelope["pair"])
+            secret = pairing.pair_secret_for(sender)
+            if secret is None:
+                return self._error(403, "that QR code has expired or was used - scan the new one")
+        else:
+            device = pairing.device(str(envelope.get("d", "")))
+            if device is None:
+                return self._error(401, "not paired - pair this device again")
+            sender, secret = device.id, bytes.fromhex(device.secret)
+        channel = Channel(secret)
+        try:
+            message, nonce = channel.open_request(envelope, sender)
+            self.server.replay.check(nonce, message.get("t"))
+        except E2eError as exc:
+            return self._error(403, str(exc))
+
+        method = str(message.get("m", "GET")).upper()
+        target = urlparse(str(message.get("p", "")))
+        if not target.path.startswith("/api/") or target.path == "/api/e2e":
+            return self._error(404, "no such API call")
+        if pairing_request and target.path != "/api/pair":
+            return self._error(403, "pair first")
+        body = message.get("b")
+        self._raw = json.dumps(body).encode() if body is not None else b""
+        self._too_big = False
+        self._device = device
+        self._seal_event = lambda event: channel.seal(event, EVENT, nonce)
+        status, data = self._call(method, target.path, target.query)
+        if data is not _STREAMED:
+            self._json(200, channel.seal({"s": status, "b": data}, RESPONSE, nonce))
+
+    def _tunnel_page(self) -> None:
+        body = TUNNEL_PAGE.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def _static(self, path: str) -> None:
         rel = "index.html" if path in ("", "/") else path.lstrip("/")
@@ -189,9 +257,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def unpair(self) -> None:
         key = self._key()
-        if key:
+        if self._device is not None:
+            self.server.pairing.unpair_device(self._device.id)
+        elif key:
             self.server.pairing.unpair(key)
-            self.server.log("a phone unpaired itself")
+        else:
+            return
+        self.server.log("a phone unpaired itself")
 
     def state(self) -> dict[str, Any]:
         return self.server.hub.state()
@@ -255,6 +327,8 @@ class Handler(BaseHTTPRequestHandler):
         self.close_connection = True
 
         def write(data: dict[str, Any]) -> None:
+            if self._seal_event:
+                data = self._seal_event(data)
             self.wfile.write(b"data: " + json.dumps(data).encode("utf-8") + b"\n\n")
 
         write({"type": "hello", "seq": seq, "state": hub.state()})
@@ -275,6 +349,13 @@ class Handler(BaseHTTPRequestHandler):
 
 
 _STREAMED = object()
+
+TUNNEL_PAGE = """<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>locoder</title><body style="background:#0d0d0d;color:#e8e8e8;font:16px system-ui;padding:32px;max-width:460px">
+<h3 style="color:#4a9eff">this is your PC's locoder</h3>
+<p>Over the internet it only talks to the locoder app, end-to-end encrypted, so nothing
+here can be read on the way. Open the app to use it.</p>
+<p style="color:#6a6a6a">At home, use the address <code>locoder serve</code> shows instead.</p></body>"""
 
 ROUTES = [
     Route("GET", "/api/hello", Handler.hello, auth=False),

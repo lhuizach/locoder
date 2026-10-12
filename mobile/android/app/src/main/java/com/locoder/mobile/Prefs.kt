@@ -18,6 +18,11 @@ class Prefs(context: Context) {
         get() = prefs.getString("key", null)
         set(value) = prefs.edit().putString("key", value).apply()
 
+    /** The encrypted tunnel's address, when locoder serve runs one. */
+    var remote: String?
+        get() = prefs.getString("remote", null)
+        set(value) = prefs.edit().putString("remote", value).apply()
+
     var notify: Boolean
         get() = prefs.getBoolean("notify", true)
         set(value) = prefs.edit().putBoolean("notify", value).apply()
@@ -25,5 +30,5 @@ class Prefs(context: Context) {
     val paired: Boolean
         get() = !server.isNullOrEmpty() && !key.isNullOrEmpty()
 
-    fun clear() = prefs.edit().remove("server").remove("key").apply()
+    fun clear() = prefs.edit().remove("server").remove("key").remove("remote").apply()
 }

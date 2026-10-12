@@ -19,7 +19,7 @@ class ActionReceiver : BroadcastReceiver() {
         val result = goAsync()
         Thread {
             try {
-                Api(server, key).confirm(requestId, approve)
+                Api(server, key, prefs.remote).confirm(requestId, approve)
             } catch (e: Exception) {
                 Log.w("locoder", "couldn't answer the request: ${e.message}")
             } finally {
