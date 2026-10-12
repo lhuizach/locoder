@@ -315,6 +315,9 @@
       <button class="btn block" id="searchBtn">search the network again</button>
     </div>
     <div class="codebox" id="codebox"></div>
+    <div class="pair-col">
+      <button class="btn primary block" id="pairBtn" disabled>connect</button>
+    </div>
     <div class="err-text" id="pairError"></div>
     <div class="hint">phone and PC on the same Wi-Fi, or both on <code>Tailscale</code></div>
   </section>
@@ -475,12 +478,18 @@ const api = {
     if (this.key) headers.Authorization = `Bearer ${this.key}`;
     if (body !== undefined) headers["Content-Type"] = "application/json";
     let res;
+    // A PC behind a firewall that drops packets never answers at all; give up
+    // after a while instead of waiting forever.
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 10000);
     try {
-      res = await fetch(this.base + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), cache: "no-store" });
+      res = await fetch(this.base + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), cache: "no-store", signal: ctrl.signal });
     } catch {
       const err = new Error("can't reach your PC");
       err.status = 0;
       throw err;
+    } finally {
+      clearTimeout(timer);
     }
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -622,22 +631,36 @@ codeCells.forEach((c, i) => {
     $("#codebox").classList.remove("bad");
     const next = codeCells.find(x => !x.value);
     if (next && c.value) next.focus();
-    if (codeCells.every(x => x.value)) pair(codeCells.map(x => x.value).join(""));
+    updatePairBtn();
+    if (codeCells.every(x => x.value)) pair(enteredCode());
   });
   c.addEventListener("keydown", e => { if (e.key === "Backspace" && !c.value && i) codeCells[i - 1].focus(); });
 });
 
+let pairing = false;
+const enteredCode = () => codeCells.map(x => x.value).join("");
+function updatePairBtn() {
+  const btn = $("#pairBtn");
+  btn.textContent = pairing ? "connecting…" : "connect";
+  btn.disabled = pairing || !/^\d{6}$/.test(enteredCode());
+}
+$("#pairBtn").addEventListener("click", () => pair(enteredCode()));
+
 async function pair(code) {
+  if (pairing) return;
   $("#pairError").textContent = "";
   if (IN_APP) {
     const server = normalizeServer($("#addrInput").value);
     if (!server) {
-      $("#pairError").textContent = "enter your PC's address first (it's shown by locoder serve)";
+      $("#pairError").textContent = "enter your PC's address first (it's shown by locoder serve), then tap connect";
+      $("#addrInput").focus();
       return;
     }
     api.base = server;
   }
   codeCells.forEach(c => c.blur());
+  pairing = true;
+  updatePairBtn();
   try {
     const device = Android?.deviceName?.() || (/Android/.test(navigator.userAgent) ? "Android browser" : "phone browser");
     const res = await api.post("/api/pair", { code, device });
@@ -650,10 +673,19 @@ async function pair(code) {
     if (S.notify) Android?.requestPermission?.();
     await start();
   } catch (e) {
-    $("#codebox").classList.add("bad");
-    codeCells.forEach(c => c.value = "");
-    codeCells[0].focus();
-    $("#pairError").textContent = e.status === 0 ? `can't reach ${shortAddr() || "that address"} - is locoder serve running?` : e.message;
+    if (e.status === 0) {
+      // Keep the code: it's the connection that failed, so connect can be tapped again.
+      $("#pairError").textContent = `can't reach ${shortAddr() || "that address"}. Check that locoder serve is running, `
+        + "the phone is on the same Wi-Fi, and Windows Firewall allows Python on private networks.";
+    } else {
+      $("#codebox").classList.add("bad");
+      codeCells.forEach(c => c.value = "");
+      codeCells[0].focus();
+      $("#pairError").textContent = e.message;
+    }
+  } finally {
+    pairing = false;
+    updatePairBtn();
   }
 }
 
@@ -661,6 +693,7 @@ function showPair() {
   stopStream();
   show("pair");
   codeCells.forEach(c => c.value = "");
+  updatePairBtn();
   if (IN_APP) {
     $("#addrCol").hidden = false;
     if (api.base) $("#addrInput").value = shortAddr();
@@ -719,6 +752,7 @@ function parsePairLink(text) {
 }
 function fillCode(code) {
   [...code].forEach((d, k) => codeCells[k].value = d);
+  updatePairBtn();
 }
 window.onLocoderScanned = function (text) {
   const link = parsePairLink(text);
