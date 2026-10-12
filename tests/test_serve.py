@@ -248,3 +248,56 @@ def test_renamed_title_survives_more_messages(tmp_path: Path):
     again.save(messages + [Message(role="assistant", content="more")])
     assert SessionStore._summarize(store.path).title == "my title"
     assert again.chat_path("../x") is None and again.chat_path(store.path.stem) == store.path
+
+
+# -- the pairing QR code ----------------------------------------------------------
+
+
+def test_pairing_link_round_trips():
+    from locoder.serve.qr import pair_url, parse_pair_url
+
+    url = pair_url("192.168.1.24", 8765, "012345")
+    assert url == "http://192.168.1.24:8765/#pair=012345"
+    assert parse_pair_url(url) == ("http://192.168.1.24:8765", "012345")
+    assert parse_pair_url("http://192.168.1.24:8765/") is None
+    assert parse_pair_url("http://x/#pair=12ab56") is None
+    assert parse_pair_url("javascript:alert(1)#pair=123456") is None
+
+
+def test_terminal_qr_matches_the_real_code():
+    import segno
+
+    from locoder.serve.qr import DARK, qr_text
+
+    data = "http://192.168.1.24:8765/#pair=012345"
+    text = qr_text(data)
+    # Rebuild the module grid from the half blocks: foreground = top, background = bottom.
+    rows: list[list[bool]] = []
+    for line in text.divide([i for i, ch in enumerate(text.plain) if ch == "\n"]):
+        top, bottom = [], []
+        for span in line.spans:
+            fg, bg = str(span.style).split(" on ")
+            top.append(fg == DARK)
+            bottom.append(bg == DARK)
+        if top:
+            rows += [top, bottom]
+    expected = [[bool(v) for v in row] for row in segno.make(data, error="m", micro=False).matrix]
+    border = 2
+    inner = [row[border:-border] for row in rows[border:border + len(expected)]]
+    assert inner == expected
+    assert not any(rows[0]) and not any(row[0] for row in rows)  # light quiet zone
+
+
+def test_no_qr_without_colours():
+    import io
+
+    from rich.console import Console
+
+    from locoder.serve import _can_show_qr, _pairing_block
+
+    plain = Console(file=io.StringIO(), color_system=None)
+    assert not _can_show_qr(plain)
+    out = Console(file=io.StringIO(), color_system=None, width=80)
+    out.print(_pairing_block("1.2.3.4", 8765, "123456", fancy=False))
+    assert "123 456" in out.file.getvalue() and "▀" not in out.file.getvalue()
+    assert _can_show_qr(Console(file=io.StringIO(), color_system="truecolor", force_terminal=True))

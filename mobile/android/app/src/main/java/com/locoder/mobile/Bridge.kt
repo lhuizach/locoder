@@ -5,6 +5,7 @@ import android.app.Activity
 import android.os.Build
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
+import com.google.zxing.integration.android.IntentIntegrator
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
@@ -67,6 +68,30 @@ class Bridge(private val activity: Activity, private val webView: WebView) {
             activity.runOnUiThread {
                 activity.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
             }
+        }
+    }
+
+    /**
+     * Opens the QR scanner (ZXing). [MainActivity] gets the result and hands
+     * it to [deliverScan], which passes it on to window.onLocoderScanned.
+     */
+    @JavascriptInterface
+    fun scanQr() {
+        activity.runOnUiThread {
+            IntentIntegrator(activity)
+                .setDesiredBarcodeFormats(IntentIntegrator.QR_CODE)
+                .setPrompt("point at the QR code locoder serve shows")
+                .setBeepEnabled(false)
+                .setOrientationLocked(false)
+                .initiateScan()
+        }
+    }
+
+    fun deliverScan(text: String) = callJs("onLocoderScanned", text)
+
+    private fun callJs(function: String, arg: String) {
+        webView.post {
+            webView.evaluateJavascript("window.$function && window.$function(${JSONObject.quote(arg)})", null)
         }
     }
 

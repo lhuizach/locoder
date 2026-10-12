@@ -18,6 +18,7 @@ from rich.text import Text
 
 from locoder.display import FAINT, FG, LOGO, MUTED, SECONDARY, pixels_to_text, wordmark_bitmap
 from locoder.serve.pairing import CODE_TTL, Pairing
+from locoder.serve.qr import pair_url, qr_text
 
 ACCENT = "#4a9eff"
 
@@ -27,6 +28,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", type=int, default=8765, help="port to listen on (default 8765)")
     parser.add_argument("--host", default="0.0.0.0",
                         help="address to listen on (default: every network this PC is on)")
+    parser.add_argument("--address",
+                        help="the address phones should use, if the one locoder picks (first listed) is wrong")
     parser.add_argument("--model", help="override the model name from config")
     parser.add_argument("--provider", help="override provider kind")
     parser.add_argument("--base-url", help="override the backend base URL")
@@ -62,10 +65,14 @@ def serve_main(argv: Optional[list[str]] = None) -> int:
         return 1
 
     ready = threading.Event()
+    addresses: list[str] = []
 
     def show_code(code: str) -> None:
         if ready.is_set():
-            console.print(Text.assemble(("new pairing code  ", MUTED), (f"{code[:3]} {code[3:]}", f"bold {ACCENT}")))
+            console.print()
+            console.print(Text("new pairing code (the last one was used or expired)", style=MUTED))
+            console.print(_pairing_block(addresses[0], args.port, code, fancy=_can_show_qr(console)))
+            console.print()
 
     def log(msg: str) -> None:
         console.print(Text.assemble(("· ", FAINT), (msg, SECONDARY)))
@@ -79,7 +86,9 @@ def serve_main(argv: Optional[list[str]] = None) -> int:
     stop = threading.Event()
     start_discovery(args.port, hub.computer, stop)
 
-    addresses = lan_addresses() if args.host in ("0.0.0.0", "") else [args.host]
+    addresses[:] = lan_addresses() if args.host in ("0.0.0.0", "") else [args.host]
+    if args.address:
+        addresses[:] = [args.address, *[a for a in addresses if a != args.address]]
     _banner(console, hub, addresses, args.port, pairing.current_code(), len(pairing.devices))
     ready.set()
 
@@ -100,13 +109,26 @@ def serve_main(argv: Optional[list[str]] = None) -> int:
     return 0
 
 
+def _fancy(console: Console) -> bool:
+    """Block characters (logo, QR code) need a console that can encode them."""
+    return (console.encoding or "").lower().replace("-", "").startswith("utf")
+
+
+def _can_show_qr(console: Console) -> bool:
+    """The QR code is drawn with colours; without them it's just a block."""
+    return _fancy(console) and console.color_system is not None
+
+
 def _banner(console: Console, hub, addresses: list[str], port: int, code: str, paired: int) -> None:
-    lockup = Table.grid(padding=(0, 3))
-    lockup.add_column(vertical="middle")
-    lockup.add_column(vertical="middle")
-    lockup.add_row(pixels_to_text(LOGO, ACCENT), pixels_to_text(wordmark_bitmap("locoder"), FG))
     console.print()
-    console.print(lockup)
+    if _fancy(console):
+        lockup = Table.grid(padding=(0, 3))
+        lockup.add_column(vertical="middle")
+        lockup.add_column(vertical="middle")
+        lockup.add_row(pixels_to_text(LOGO, ACCENT), pixels_to_text(wordmark_bitmap("locoder"), FG))
+        console.print(lockup)
+    else:
+        console.print(Text("locoder", style=f"bold {ACCENT}"))
     console.print()
     console.print(Text.assemble(("serving ", MUTED), (hub.project_info()["label"], FG),
                                 ("  ·  ", FAINT), (hub.provider.model, SECONDARY)))
@@ -117,10 +139,27 @@ def _banner(console: Console, hub, addresses: list[str], port: int, code: str, p
         # VPN / VM / WSL adapters: usually not the one the phone can see.
         console.print(Text.assemble((f"  http://{addr}:{port}", SECONDARY), ("  other network", FAINT)))
     console.print()
-    console.print(Text.assemble(("pairing code  ", MUTED), (f"{code[:3]} {code[3:]}", f"bold {ACCENT}"),
-                                (f"   (works once, for {CODE_TTL // 60} minutes)", FAINT)))
+    console.print(_pairing_block(addresses[0], port, code, fancy=_can_show_qr(console)))
     if paired:
         console.print(Text(f"{paired} phone{'s are' if paired != 1 else ' is'} already paired", style=MUTED))
     console.print()
     console.print(Text("first time? if Windows asks, allow Python on private networks.  ctrl+c stops", style=FAINT))
     console.print()
+
+
+def _pairing_block(address: str, port: int, code: str, *, fancy: bool = True):
+    """The QR code, with the code to type next to it."""
+    if not fancy:
+        return Text.assemble(("pairing code  ", MUTED), (f"{code[:3]} {code[3:]}", f"bold {ACCENT}"),
+                             (f"   (works once, for {CODE_TTL // 60} minutes)", FAINT))
+    info = Text.assemble(
+        ("scan with your phone's camera\n", FG),
+        ("or with scan QR code in the app\n\n", MUTED),
+        ("or type the code  ", MUTED), (f"{code[:3]} {code[3:]}", f"bold {ACCENT}"), ("\n", ""),
+        (f"works once, for {CODE_TTL // 60} minutes", FAINT),
+    )
+    block = Table.grid(padding=(0, 3))
+    block.add_column(no_wrap=True)
+    block.add_column(vertical="middle")
+    block.add_row(qr_text(pair_url(address, port, code)), info)
+    return block

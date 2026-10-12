@@ -7,6 +7,7 @@ import android.graphics.Color
 import android.os.Bundle
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import com.google.zxing.integration.android.IntentIntegrator
 import org.json.JSONObject
 
 /**
@@ -59,6 +60,17 @@ class MainActivity : Activity() {
 
     private fun openChat(chat: String) {
         webView.evaluateJavascript("window.locoderOpenChat && window.locoderOpenChat(${JSONObject.quote(chat)})", null)
+    }
+
+    @Deprecated("Still the simplest hook on every API level this app supports")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        val scan = IntentIntegrator.parseActivityResult(requestCode, resultCode, data)
+        if (scan == null) {
+            @Suppress("DEPRECATION")
+            super.onActivityResult(requestCode, resultCode, data)
+            return
+        }
+        scan.contents?.let { bridge.deliverScan(it) }  // null: the scan was cancelled
     }
 
     override fun onResume() {

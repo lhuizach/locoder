@@ -12,8 +12,11 @@ What changed from the sketch below while building it:
 - Live events are server-sent events over a streaming GET
   (`/api/events?since=<seq>`), not a WebSocket - standard library only, and
   a phone that drops off replays what it missed by sequence number.
-- No QR code yet: the Android app finds the PC by UDP broadcast ("locoder?"
-  on the serve port), or you type the address; then the 6-digit code.
+- Pairing: `locoder serve` prints a QR code of `http://<pc>:<port>/#pair=<code>`.
+  A phone camera opens it in the browser, which pairs at once; the app scans
+  it with a bundled ZXing scanner (no Google Play needed). Without a camera:
+  the app finds the PC by UDP broadcast ("locoder?" on the serve port), or
+  you type the address, then the 6-digit code.
 - `PATCH /api/state {mode, model, temperature, yolo}`; new chats are
   `POST /api/chats {text}`, which creates the chat and starts the task.
 - One task at a time per PC (a local model answers one request at once).
@@ -79,4 +82,5 @@ push servers involved, so it stays local.
 1. `locoder serve` + pairing + the API above, with tests. (done)
 2. The web app wired to the API; usable from the phone browser. (done)
 3. Android wrapper: WebView, discovery, notifications with Approve/Decline. (done)
-4. Next: QR pairing, voice input, a key store backed by Android Keystore.
+4. QR pairing. (done)
+5. Next: voice input, a key store backed by Android Keystore.

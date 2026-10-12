@@ -13,8 +13,8 @@ android {
         // 34, not 35: Android 15 forces edge-to-edge for apps targeting 35,
         // which the WebView layout doesn't handle yet.
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.3.0"
     }
 
     // The web app is the single source of truth: package the one
@@ -34,4 +34,12 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+}
+
+dependencies {
+    // QR scanner bundled in the app (ZXing): works offline, on any phone,
+    // with or without Google Play.
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+    // ...which uses AndroidX Core without bringing it along.
+    implementation("androidx.core:core:1.13.1")
 }

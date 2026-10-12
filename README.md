@@ -46,13 +46,16 @@ locoder serve
 ```
 
 runs locoder in the current folder behind a small server on your local
-network and prints a 6-digit pairing code. Then either:
+network and prints a pairing QR code. Then either:
 
-- install the Android app (`mobile/android`, `gradlew assembleDebug`): it
-  finds the PC on your Wi-Fi, or type the address `locoder serve` shows; or
-- open that address (`http://<your-pc>:8765`) in your phone's browser.
+- scan it with your phone's camera: it opens locoder in the browser,
+  already paired; or
+- in the Android app (`mobile/android`, `gradlew assembleDebug`) tap
+  **scan QR code** - or pick your PC from the ones it finds on the Wi-Fi and
+  type the 6-digit code shown next to the QR.
 
-Enter the code once; the phone gets its own key. Chats, approvals, mode,
+The code works once; the phone gets its own key. If the QR points at the
+wrong network (VPN or VM adapters), pass `--address <your-pc-ip>`. Chats, approvals, mode,
 model and project switching all work from the phone, and the chats are the
 same `.locoder/sessions` the CLI uses. The Android app notifies you when a
 task needs your OK (with Approve / Decline right on the notification) or
