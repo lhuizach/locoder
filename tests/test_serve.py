@@ -431,3 +431,18 @@ def test_phones_paired_before_encryption_get_a_secret(tmp_path: Path):
     assert old.check(key) is not None
     assert old.device(old.devices[0].id) is not None
     assert json.loads(store.read_text())[0]["secret"]
+
+
+def test_pairing_link_prints_on_one_line_when_there_is_no_qr():
+    import io
+
+    from rich.console import Console
+
+    from locoder.serve import _print_pairing
+
+    out = Console(file=io.StringIO(), color_system=None, width=40)
+    _print_pairing(out, "192.168.1.158", 8765, "123456", secret=bytes(range(32)),
+                   remote="https://some-long-tunnel-name-here.trycloudflare.com")
+    lines = out.file.getvalue().splitlines()
+    link = next(line for line in lines if "pairing link" in line).split()[-1]
+    assert link.endswith("&r=https://some-long-tunnel-name-here.trycloudflare.com") and "#pair=123456&k=" in link

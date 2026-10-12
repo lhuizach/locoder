@@ -76,8 +76,7 @@ def serve_main(argv: Optional[list[str]] = None) -> int:
         if ready.is_set():
             console.print()
             console.print(Text("new pairing code (the last one was used or expired)", style=MUTED))
-            console.print(_pairing_block(addresses[0], args.port, code, secret=pairing.pair_secret,
-                                         remote=hub.remote, fancy=_can_show_qr(console)))
+            _print_pairing(console, addresses[0], args.port, code, secret=pairing.pair_secret, remote=hub.remote)
             console.print()
 
     def log(msg: str) -> None:
@@ -181,8 +180,7 @@ def _banner(console: Console, hub, addresses: list[str], port: int, code: str, p
         console.print(Text.assemble((f"  {hub.remote}", f"bold {FG}"),
                                     ("  end-to-end encrypted, Cloudflare can't read it", FAINT)))
     console.print()
-    console.print(_pairing_block(addresses[0], port, code, secret=secret, remote=hub.remote,
-                                 fancy=_can_show_qr(console)))
+    _print_pairing(console, addresses[0], port, code, secret=secret, remote=hub.remote)
     if paired:
         console.print(Text(f"{paired} phone{'s are' if paired != 1 else ' is'} already paired", style=MUTED))
     console.print()
@@ -190,10 +188,22 @@ def _banner(console: Console, hub, addresses: list[str], port: int, code: str, p
     console.print()
 
 
+def _print_pairing(console: Console, address: str, port: int, code: str, *, secret: bytes = b"",
+                   remote: Optional[str] = None) -> None:
+    fancy = _can_show_qr(console)
+    console.print(_pairing_block(address, port, code, secret=secret, remote=remote, fancy=fancy))
+    if not fancy:
+        # No QR here: the link it would hold, to paste into the app instead.
+        # soft_wrap keeps it on one line however narrow the console, so it copies whole.
+        link = pair_url(address, port, code, secret=secret, remote=remote)
+        console.print(Text.assemble(("pairing link  ", MUTED), (link, FG)), soft_wrap=True)
+
+
 def _pairing_block(address: str, port: int, code: str, *, secret: bytes = b"", remote: Optional[str] = None,
                    fancy: bool = True):
     """The QR code, with the code to type next to it."""
     if not fancy:
+        # No QR possible here: the link it would hold, to paste into the app instead.
         return Text.assemble(("pairing code  ", MUTED), (f"{code[:3]} {code[3:]}", f"bold {ACCENT}"),
                              (f"   (works once, for {CODE_TTL // 60} minutes)", FAINT))
     info = Text.assemble(
