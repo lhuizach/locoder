@@ -242,6 +242,10 @@
   .box textarea { width: 100%; resize: none; background: none; border: 0; outline: none; padding: 10px 0 6px; max-height: 140px; line-height: 1.4; display: block; }
   .box-row { display: flex; align-items: center; gap: 4px; }
   .box-row .grow { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .think-chip { flex: none; height: 30px; padding: 0 11px; margin: 0 4px; border: 1px solid var(--line); border-radius: 999px; font: 800 12px var(--sans); color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
+  .think-chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: .5; }
+  .think-chip.on { border-color: color-mix(in srgb, var(--accent) 60%, transparent); color: var(--accent); }
+  .think-chip.on::before { opacity: 1; }
   .send { width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; background: var(--accent); color: #0b0b0b; flex: none; }
   .send:disabled { background: var(--line); color: var(--muted); }
   .send svg { width: 18px; height: 18px; }
@@ -387,6 +391,7 @@
           <button class="iconbtn" id="attachBtn" aria-label="attach file" style="width:34px;height:34px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21 12-8.5 8.5a5 5 0 0 1-7-7L14 5a3.5 3.5 0 0 1 5 5l-8.6 8.5a2 2 0 0 1-2.8-2.8L15.5 8"/></svg>
           </button>
+          <button class="think-chip on" id="thinkChip" aria-label="thinking" title="thinking: on is slower and more careful, off is much faster">Think</button>
           <div class="grow mono muted" style="font-size:11px; font-weight:600" id="boxMeta"></div>
           <button class="send" id="sendBtn" disabled aria-label="send">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
@@ -1083,6 +1088,9 @@ function applyState(st) {
   $("#ctxVal").textContent = (s.num_ctx || 0).toLocaleString("en");
   $("#confirmSwitch").classList.toggle("on", !s.yolo);
   $("#thinkSwitch").classList.toggle("on", s.think !== false);
+  const chip = $("#thinkChip");
+  chip.classList.toggle("on", s.think !== false);
+  chip.textContent = s.think === false ? "Think: off" : "Think";
   if (document.activeElement !== $("#tempRange") && s.temperature != null) {
     $("#tempRange").value = s.temperature;
     $("#tempVal").textContent = fmtTemp(s.temperature);
@@ -1750,12 +1758,19 @@ $("#notifySwitch").addEventListener("click", e => {
   if (S.notify) Android?.requestPermission?.();
   toast(S.notify ? "notifications on" : "notifications off");
 });
-$("#thinkSwitch").addEventListener("click", () => {
-  const thinking = S.server.think === false;  // the click turns it the other way
+// Both the switch in Settings and the Think button in the message box.
+function toggleThinking() {
+  const thinking = S.server.think === false;  // a click turns it the other way
   api.patch("/api/state", { think: thinking })
-    .then(st => { applyState(st); toast(thinking ? "thinking on - slower, more careful" : "thinking off - much faster"); })
+    .then(st => {
+      applyState(st);
+      const now = thinking ? "thinking on - slower, more careful" : "thinking off - much faster, a bit less careful";
+      toast(S.server.running ? `${now} (from the next message)` : now);
+    })
     .catch(fail);
-});
+}
+$("#thinkSwitch").addEventListener("click", toggleThinking);
+$("#thinkChip").addEventListener("click", toggleThinking);
 $("#confirmSwitch").addEventListener("click", () => {
   if (!S.server.yolo) {
     dialog({ title: "turn on yolo mode?", text: "locoder will make everyday edits and run everyday commands on your PC without asking, until locoder serve restarts. Risky ones (deleting a lot, big files, anything outside the project) still ask.", okLabel: "turn on yolo", danger: true,
