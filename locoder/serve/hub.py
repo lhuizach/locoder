@@ -324,6 +324,7 @@ class Hub:
                 "base_url": self.config.base_url,
                 "temperature": self.config.temperature,
                 "num_ctx": self.config.num_ctx,
+                "think": self.config.think,
                 "yolo": self.yolo,
                 "running": run.chat if run else None,
                 "pending": [p.public() for p in self.pending.values()],
@@ -347,6 +348,9 @@ class Hub:
                     raise HubError(400, "no model given")
                 self.config.model = model
                 save = True
+            if "think" in changes:
+                self.config.think = bool(changes["think"])
+                save = True
             if "temperature" in changes:
                 try:
                     self.config.temperature = min(2.0, max(0.0, float(changes["temperature"])))
@@ -358,7 +362,7 @@ class Hub:
                 self.provider = self.provider_factory(**self.config.provider_kwargs())
                 self.config.save(self.root)
         state = self.state()
-        self.publish("state", state={k: state[k] for k in ("mode", "model", "temperature", "yolo")})
+        self.publish("state", state={k: state[k] for k in ("mode", "model", "temperature", "yolo", "think")})
         return state
 
     # -- files for the phone -----------------------------------------------------

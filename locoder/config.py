@@ -24,7 +24,7 @@ DEFAULT_MODEL = "qwen3.5:4b"
 GLOBAL_ONLY_KEYS = ("yolo", "allowed_paths")
 
 # Keys the settings screen edits, and so writes back to the project file.
-PROJECT_SETTINGS_KEYS = ("provider", "model", "base_url", "temperature", "num_ctx")
+PROJECT_SETTINGS_KEYS = ("provider", "model", "base_url", "temperature", "num_ctx", "think")
 
 CONFIG_TEMPLATE = f"""\
 # locoder configuration
@@ -41,6 +41,9 @@ context_compaction_threshold: 0.85
 # api_key: only needed for hosted OpenAI-compatible endpoints
 api_key: null
 timeout: 120
+# think: false skips the model's long "thinking" step - much faster answers,
+# a bit less careful on hard problems (only affects models that think, on Ollama)
+think: true
 # yolo and allowed_paths are ignored here for safety (a cloned repo could ship
 # this file); set them in ~/.locoder/config.yaml or pass --yolo instead.
 """
@@ -70,6 +73,9 @@ class AppConfig:
     context_compaction_threshold: float = 0.85
     api_key: Optional[str] = None
     timeout: float = 120.0
+    # False asks a thinking model (Ollama's qwen3 etc.) to skip its long
+    # "thinking" step: far faster answers, a bit less careful on hard problems.
+    think: bool = True
     yolo: bool = False
     allowed_paths: list[str] = field(default_factory=list)
     # Not a config key: problems noticed while loading, for the UI to show.
@@ -144,6 +150,7 @@ class AppConfig:
             "num_ctx": self.num_ctx,
             "api_key": self.api_key,
             "timeout": self.timeout,
+            "think": self.think,
         }
 
     def save(self, project_root: Path) -> Path:

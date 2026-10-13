@@ -70,6 +70,15 @@ for HTML files, **open**, which tries the page right in the app (in a sandbox
 with no network, and without access to the app itself). Files up to 8 MB;
 secrets (`.env`, keys) and anything in `.git`/`.locoder` are never sent.
 
+## Faster answers
+
+Models like qwen3 "think" before answering, which can take minutes on a slow
+GPU. `/think` (terminal) or the **thinking** switch in the phone app's
+settings turns that off: much faster, a bit less careful on hard problems.
+Set `think: false` in `.locoder/config.yaml` to keep it off. If answers are
+slow anyway, check `num_ctx`: too big a context window can push part of the
+model onto the CPU (`ollama ps` shows the split).
+
 ## Safety
 
 locoder asks before it writes a file or runs a command. Yolo mode (`--yolo`,

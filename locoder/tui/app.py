@@ -354,6 +354,11 @@ class LocoderApp(App):
             self.agent.set_yolo(not self.agent.yolo)
             self._refresh_mode_display()
             self._say("system", f"yolo mode {'enabled' if self.agent.yolo else 'disabled'}")
+        elif command.name == "think":
+            thinking = not self.agent.provider.think
+            self.agent.set_provider(self.agent.provider.with_think(thinking))
+            self._say("system", "thinking on - slower, more careful" if thinking
+                      else "thinking off - much faster, a bit less careful (this session only)")
         elif command.name == "sidebar":
             self.action_toggle_sidebar()
         elif command.name == "tokens":

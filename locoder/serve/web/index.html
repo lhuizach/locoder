@@ -415,6 +415,7 @@
       <div class="group">
         <button class="item" id="settingsModel"><div class="grow">model</div><span class="val" id="settingsModelVal">…</span></button>
         <div class="item"><div class="grow">temperature<div class="sub">lower = more predictable</div></div><input type="range" min="0" max="1" step="0.05" value="0.2" id="tempRange"><span class="val" id="tempVal" style="width:34px;text-align:right">0.2</span></div>
+        <div class="item"><div class="grow">thinking<div class="sub">off = much faster answers, a bit less careful on hard problems</div></div><button class="switch on" id="thinkSwitch" aria-label="thinking"></button></div>
         <div class="item"><div class="grow">context window</div><span class="val" id="ctxVal">…</span></div>
         <div class="item"><div class="grow">in memory<div class="sub" id="memSub">…</div></div><button class="btn" id="unloadBtn" style="height:36px;padding:0 14px" hidden>unload now</button></div>
       </div>
@@ -1081,6 +1082,7 @@ function applyState(st) {
   $("#versionVal").textContent = s.version ? `v${s.version}` : "";
   $("#ctxVal").textContent = (s.num_ctx || 0).toLocaleString("en");
   $("#confirmSwitch").classList.toggle("on", !s.yolo);
+  $("#thinkSwitch").classList.toggle("on", s.think !== false);
   if (document.activeElement !== $("#tempRange") && s.temperature != null) {
     $("#tempRange").value = s.temperature;
     $("#tempVal").textContent = fmtTemp(s.temperature);
@@ -1747,6 +1749,12 @@ $("#notifySwitch").addEventListener("click", e => {
   Android?.setNotify?.(S.notify);
   if (S.notify) Android?.requestPermission?.();
   toast(S.notify ? "notifications on" : "notifications off");
+});
+$("#thinkSwitch").addEventListener("click", () => {
+  const thinking = S.server.think === false;  // the click turns it the other way
+  api.patch("/api/state", { think: thinking })
+    .then(st => { applyState(st); toast(thinking ? "thinking on - slower, more careful" : "thinking off - much faster"); })
+    .catch(fail);
 });
 $("#confirmSwitch").addEventListener("click", () => {
   if (!S.server.yolo) {

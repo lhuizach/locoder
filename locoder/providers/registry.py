@@ -34,6 +34,7 @@ def create_provider(
     num_ctx: int = 8192,
     api_key: str | None = None,
     timeout: float = 120.0,
+    think: bool = True,
 ) -> ModelProvider:
     cls = PROVIDER_KINDS.get(kind.lower())
     if cls is None:
@@ -45,4 +46,5 @@ def create_provider(
         num_ctx=num_ctx,
         api_key=api_key,
         timeout=timeout,
+        think=think,
     )

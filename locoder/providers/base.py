@@ -135,6 +135,7 @@ class ModelProvider(ABC):
         num_ctx: int = 8192,
         api_key: Optional[str] = None,
         timeout: float = 120.0,
+        think: bool = True,
     ) -> None:
         self.model = model
         self.base_url = base_url.rstrip("/")
@@ -142,6 +143,14 @@ class ModelProvider(ABC):
         self.num_ctx = num_ctx
         self.api_key = api_key
         self.timeout = timeout
+        self.think = think
+
+    def with_think(self, think: bool) -> "ModelProvider":
+        """Return a copy of this provider with thinking switched on or off."""
+        clone = self.__class__.__new__(self.__class__)
+        clone.__dict__.update(self.__dict__)
+        clone.think = think
+        return clone
 
     def chat_timeout(self) -> tuple[float, float]:
         """(connect, read) timeouts for a chat request."""

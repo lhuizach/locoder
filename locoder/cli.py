@@ -191,6 +191,12 @@ def _handle_slash_command(raw: str, agent: Agent, ui: UI) -> bool:
         agent.set_yolo(not agent.yolo)
         ui.system(f"yolo mode {'enabled' if agent.yolo else 'disabled'}")
         return False
+    if cmd == "think":
+        thinking = not agent.provider.think
+        agent.set_provider(agent.provider.with_think(thinking))
+        ui.system("thinking on - slower, more careful" if thinking
+                  else "thinking off - much faster, a bit less careful (this session only)")
+        return False
     if cmd == "tokens":
         used, limit = agent.token_usage()
         ui.token_usage(used=used, limit=limit)

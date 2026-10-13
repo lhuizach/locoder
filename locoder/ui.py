@@ -91,6 +91,7 @@ class UI:
             ("/clear", "clear the conversation and start a new session"),
             ("/model <name>", "switch the active model"),
             ("/yolo", "skip approvals for everyday actions (risky ones still ask)"),
+            ("/think", "turn the model's thinking on or off (off is much faster)"),
             ("/tokens", "show context/token usage"),
             ("/exit, /quit", "leave locoder"),
         ]:

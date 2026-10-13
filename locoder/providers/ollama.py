@@ -60,6 +60,9 @@ class OllamaProvider(ModelProvider):
         }
         if tools:
             payload["tools"] = tools
+        if not self.think:
+            # Only sent when turned off, so models that don't think are untouched.
+            payload["think"] = False
 
         try:
             resp = requests.post(
