@@ -110,7 +110,7 @@ def test_sidebar_collapses_with_animation_and_comes_back(tmp_path: Path):
             assert app.sidebar.region.width == 0
 
             await pilot.press("ctrl+b")  # the real key brings it back
-            await pilot.pause(0.1)
+            await pilot.pause(0.5)  # longer than the 0.22s animation, even on a slow run
             assert not app.screen.has_class("sidebar-hidden")
             assert app.sidebar.region.width == full
             assert app.sidebar.styles.opacity == 1.0
