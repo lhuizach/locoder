@@ -13,8 +13,8 @@ android {
         // 34, not 35: Android 15 forces edge-to-edge for apps targeting 35,
         // which the WebView layout doesn't handle yet.
         targetSdk = 34
-        versionCode = 8
-        versionName = "0.6.1"
+        versionCode = 9
+        versionName = "0.6.2"
     }
 
     // The web app is the single source of truth: package the one
