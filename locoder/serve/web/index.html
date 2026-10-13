@@ -162,12 +162,10 @@
   #transcript { padding: 8px 16px 20px; }
   .msg-user {
     margin: 14px 0 6px auto; max-width: 88%; width: fit-content;
-    border: 1px solid var(--line); border-radius: var(--r); padding: 6px 12px 8px; position: relative;
+    border: 1px solid var(--line); border-radius: var(--r); padding: 8px 12px; position: relative;
     white-space: pre-wrap; overflow-wrap: anywhere;
   }
-  .msg-user .who { font: 600 11px var(--sans); color: var(--muted); }
   .turn { margin: 16px 0 4px; }
-  .turn-head { font: 800 14px var(--sans); color: var(--accent); margin-bottom: 4px; }
   .thought { font: italic 600 13px var(--sans); color: var(--muted); padding: 2px 0; }
   .thought .body { display: none; white-space: pre-wrap; padding: 6px 0 4px 12px; border-left: 1px solid var(--line); margin: 4px 0; max-height: 320px; overflow: auto; }
   .thought.open .body { display: block; }
@@ -384,7 +382,7 @@
       <div class="box">
         <span class="box-label" id="boxLabel">Build</span>
         <div class="attachments" id="attachments"></div>
-        <textarea id="prompt" rows="1" placeholder='Ask anything… "fix the failing tests"'></textarea>
+        <textarea id="prompt" rows="1" placeholder="Ask anything"></textarea>
         <div class="box-row">
           <button class="iconbtn" id="attachBtn" aria-label="attach file" style="width:34px;height:34px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21 12-8.5 8.5a5 5 0 0 1-7-7L14 5a3.5 3.5 0 0 1 5 5l-8.6 8.5a2 2 0 0 1-2.8-2.8L15.5 8"/></svg>
@@ -1309,7 +1307,7 @@ function renderEntries(entries) {
       continue;
     }
     if (!turn) {
-      turn = h("div", { class: "turn" }, h("div", { class: "turn-head" }, "locoder"));
+      turn = h("div", { class: "turn" });
       out.push(turn);
     }
     if (e.type === "text") turn.append(h("div", { class: e.narration ? "answer narration" : "answer", html: md(e.text) }));
@@ -1318,7 +1316,7 @@ function renderEntries(entries) {
   $("#transcript").replaceChildren(...out);
 }
 function userMsg(text) {
-  return h("div", { class: "msg-user" }, h("div", { class: "who" }, "you"), h("div", {}, text));
+  return h("div", { class: "msg-user" }, text);
 }
 function toolView({ verb, target, summary, output, status = "ok", file = null }) {
   const icon = { ok: "•", err: "×", declined: "!", pending: "·" }[status] || "•";
@@ -1415,7 +1413,7 @@ function setUsage(u) {
 /* ---------- the live turn, built from events ---------- */
 function ensureTurn() {
   if (view.turn) return;
-  view.turn = h("div", { class: "turn" }, h("div", { class: "turn-head" }, "locoder"));
+  view.turn = h("div", { class: "turn" });
   view.live = h("div", { class: "live" }, snake(), h("span", {}, "Thinking 0s"));
   view.turn.append(view.live);
   $("#transcript").append(view.turn);
