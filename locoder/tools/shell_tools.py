@@ -1,49 +1,23 @@
 """Shell command execution tool.
 
 Every invocation goes through confirmation (unless --yolo is set); commands
-that match a known-destructive pattern get flagged in the confirmation
-prompt so the user notices before approving.
+locoder.safety finds risky are always confirmed, yolo or not, with the
+reasons shown so the user notices before approving.
 """
 
 from __future__ import annotations
 
 import os
-import re
 import signal
 import subprocess
 import sys
 from typing import Any
 
+from locoder.safety import command_risks
 from locoder.tools.base import Tool, ToolContext, ToolError, ToolResult, register
 
 DEFAULT_TIMEOUT = 120
 OUTPUT_CAP = 10_000
-
-DESTRUCTIVE_PATTERNS = [
-    r"\brm\s+-[a-z]*r[a-z]*f\b",
-    r"\brm\s+-[a-z]*f[a-z]*r\b",
-    r"\bgit\s+push\b.*(--force|-f)\b",
-    r"\bgit\s+reset\s+--hard\b",
-    r"\bgit\s+clean\s+-[a-z]*f\b",
-    r"\bgit\s+branch\s+-D\b",
-    r"\bdrop\s+(table|database)\b",
-    r"\btruncate\s+table\b",
-    r"\bdel\s+/[fsq]",
-    r"\brmdir\s+/s\b",
-    r"\bmkfs\b",
-    r"\bdd\s+if=",
-    r":\(\)\s*{\s*:\|:&\s*};",  # fork bomb
-    r"\bformat\s+[a-z]:",
-    r"\bshutdown\b",
-    r"\breboot\b",
-    r"\bchmod\s+-R\s+777\b",
-]
-_DESTRUCTIVE_RE = re.compile("|".join(DESTRUCTIVE_PATTERNS), re.IGNORECASE)
-
-
-def _looks_destructive(command: str) -> bool:
-    return bool(_DESTRUCTIVE_RE.search(command))
-
 
 def _kill_tree(proc: subprocess.Popen) -> None:
     """Kill ``proc`` and everything it spawned. With shell=True, ``proc`` is
@@ -73,11 +47,10 @@ def _run_command(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
 
     timeout = int(args.get("timeout", DEFAULT_TIMEOUT))
     label = "Run shell command"
-    if _looks_destructive(command):
-        label += "  [DESTRUCTIVE - double check this]"
     preview = f"$ {command}\n(cwd: {ctx.sandbox.display_path(cwd)})"
+    reasons = command_risks(command, ctx.sandbox.root, cwd, ctx.written)
 
-    if not ctx.confirm(label, preview):
+    if not ctx.confirm(label, preview, reasons):
         return ToolResult(output="user declined to run the command", is_error=True)
 
     proc = subprocess.Popen(

@@ -8,7 +8,7 @@ so every method here marshals back onto the app's event loop via
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Sequence
 
 from locoder.tools.base import ToolResult
 
@@ -48,8 +48,8 @@ class TuiUI:
 
         self.app.call_from_thread(_update)
 
-    def confirm(self, title: str, preview: str, *, lang: str = "diff") -> bool:
-        return self.app.call_from_thread(self.app.request_confirm, title, preview, lang)
+    def confirm(self, title: str, preview: str, *, lang: str = "diff", reasons: Sequence[str] = ()) -> bool:
+        return self.app.call_from_thread(self.app.request_confirm, title, preview, lang, list(reasons))
 
     def info(self, msg: str) -> None:
         self.app.call_from_thread(self.app.chat_log.add_info, msg)

@@ -116,3 +116,23 @@ def test_sidebar_collapses_with_animation_and_comes_back(tmp_path: Path):
             assert app.sidebar.styles.opacity == 1.0
 
     _run(scenario())
+
+
+def test_approval_dialog_lists_why_an_action_is_risky(tmp_path: Path):
+    from textual.widgets import Static
+
+    from locoder.tui.modals import ConfirmModal
+
+    async def scenario() -> None:
+        app = _app(tmp_path)
+        async with app.run_test(size=(110, 40)) as pilot:
+            answers: list[bool] = []
+            app.push_screen(ConfirmModal("Run shell command", "$ rm -rf build", "text",
+                                         reasons=["it deletes folders and everything in them"]), answers.append)
+            await pilot.pause()
+            warning = app.screen.query_one("#confirm-warning", Static)
+            assert "it deletes folders and everything in them" in str(warning.render())
+            await pilot.press("n")
+            assert answers == [False]
+
+    _run(scenario())

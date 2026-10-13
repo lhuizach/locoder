@@ -11,7 +11,7 @@ it falls back to plain ASCII.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 from rich import box
 from rich.console import Console
@@ -72,7 +72,7 @@ class UI:
         else:
             self.console.print(Text("locoder", style=f"bold {self.accent}"))
         self.console.print()
-        writes = Text("yolo - no confirmations", style=f"bold {self.accent}") if yolo else Text(
+        writes = Text("yolo - asks only for risky actions", style=f"bold {self.accent}") if yolo else Text(
             "asks before writes and commands", style=MUTED)
         self.console.print(Text.assemble((model, FG), (SEP, FAINT), (provider, SECONDARY), (SEP, FAINT)), writes,
                            sep="")
@@ -90,7 +90,7 @@ class UI:
             ("/help", "show this message"),
             ("/clear", "clear the conversation and start a new session"),
             ("/model <name>", "switch the active model"),
-            ("/yolo", "toggle confirmation prompts on/off"),
+            ("/yolo", "skip approvals for everyday actions (risky ones still ask)"),
             ("/tokens", "show context/token usage"),
             ("/exit, /quit", "leave locoder"),
         ]:
@@ -143,15 +143,17 @@ class UI:
 
     # -- confirmation / diffs ------------------------------------------------
 
-    def confirm(self, title: str, preview: str, *, lang: str = "diff") -> bool:
+    def confirm(self, title: str, preview: str, *, lang: str = "diff", reasons: Sequence[str] = ()) -> bool:
         self.end_stream()
-        destructive = DESTRUCTIVE_MARK in title
+        destructive = bool(reasons) or DESTRUCTIVE_MARK in title
         title = title.replace(DESTRUCTIVE_MARK, "").strip()
         color = ERROR if destructive else self.accent
         body = self._render_preview(preview, lang)
         if destructive:
             body = Table.grid()
-            body.add_row(Text("this command looks destructive - read it carefully", style=f"bold {ERROR}"))
+            body.add_row(Text("careful - read this before you approve:", style=f"bold {ERROR}"))
+            for reason in reasons or ["this command looks destructive"]:
+                body.add_row(Text(f"  {'•' if self.fancy else '-'} {reason}", style=ERROR))
             body.add_row(Text(""))
             body.add_row(self._render_preview(preview, lang))
         self.console.print(Panel(body, title=Text(f" {title} ", style=f"bold {color}"), title_align="left",

@@ -10,7 +10,7 @@ import sys
 import threading
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 
 from locoder.context import ContextManager
 from locoder.providers.base import Message, ModelProvider
@@ -132,7 +132,11 @@ class Agent:
         )
         self._cancel_requested = threading.Event()
 
-    def _confirm(self, title: str, preview: str) -> bool:
+    def _confirm(self, title: str, preview: str, reasons: Sequence[str] = ()) -> bool:
+        if reasons:
+            # Risky (locoder.safety): always asks, yolo or not. Small models
+            # don't reliably know a dangerous action when they see one.
+            return self.ui.confirm(title, preview, reasons=list(reasons))
         if self.yolo:
             return True
         return self.ui.confirm(title, preview)

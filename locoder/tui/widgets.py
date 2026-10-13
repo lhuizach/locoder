@@ -152,7 +152,7 @@ class Sidebar(Static):
 
     def _refresh_display(self) -> None:
         filled, empty, frac = context_bar(self._used, self._limit, width=24)
-        writes = Text("yolo - no confirmations", style=f"bold {self._accent}") if self._yolo else Text(
+        writes = Text("yolo - asks only for risky actions", style=f"bold {self._accent}") if self._yolo else Text(
             "asks before writes and commands", style=MUTED)
         blocks = [
             Text("locoder", style=f"bold {FG}"),

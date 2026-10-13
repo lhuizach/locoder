@@ -9,7 +9,7 @@ import itertools
 import re
 import threading
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, Sequence
 
 from locoder.display import TOOL_VERBS, tool_target
 from locoder.serve.transcript import tool_entry
@@ -30,12 +30,13 @@ class ConfirmRequest:
     preview: str
     danger: bool
     chat_title: str = ""
+    reasons: list[str] = field(default_factory=list)
     answered: threading.Event = field(default_factory=threading.Event)
     approved: bool = False
 
     def public(self) -> dict[str, Any]:
         return {"id": self.id, "chat": self.chat, "chat_title": self.chat_title, "title": self.title,
-                "preview": self.preview, "danger": self.danger}
+                "preview": self.preview, "danger": self.danger, "reasons": self.reasons}
 
 
 class WebUI:
@@ -70,13 +71,14 @@ class WebUI:
     def tool_result(self, name: str, result: ToolResult) -> None:
         self._emit("tool_result", entry=tool_entry(name, self._last_args.get(name, {}), result))
 
-    def confirm(self, title: str, preview: str, *, lang: str = "diff") -> bool:
+    def confirm(self, title: str, preview: str, *, lang: str = "diff", reasons: Sequence[str] = ()) -> bool:
         request = ConfirmRequest(
             id=str(next(_ids)),
             chat=self.chat_id,
             title=title.replace(DESTRUCTIVE_MARK, "").strip(),
             preview=preview,
-            danger=DESTRUCTIVE_MARK in title,
+            danger=bool(reasons) or DESTRUCTIVE_MARK in title,
+            reasons=list(reasons),
         )
         return self.hub.ask(request)
 

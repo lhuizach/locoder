@@ -417,7 +417,7 @@
 
       <div class="group-title">safety</div>
       <div class="group">
-        <div class="item"><div class="grow">ask before edits and commands<div class="sub">turning this off = yolo mode, until locoder serve restarts</div></div><button class="switch on" id="confirmSwitch" aria-label="ask before edits"></button></div>
+        <div class="item"><div class="grow">ask before edits and commands<div class="sub">off = yolo mode until locoder serve restarts; risky actions still ask</div></div><button class="switch on" id="confirmSwitch" aria-label="ask before edits"></button></div>
       </div>
 
       <div class="group-title">about</div>
@@ -1488,7 +1488,8 @@ function approvalCard(req) {
   if (view.cards[req.id]) return view.cards[req.id];
   const card = h("div", { class: `approve ${req.danger ? "danger" : ""}` },
     h("div", { class: "head" }, req.title),
-    req.danger ? h("div", { class: "warn" }, "this command looks destructive - read it carefully") : null,
+    req.danger ? h("div", { class: "warn" }, "careful - read this before you approve:",
+      ...(req.reasons?.length ? req.reasons : ["this command looks destructive"]).map(r => h("div", {}, `• ${r}`))) : null,
     h("div", { class: "diff" }, ...diffLines(req.preview)),
     h("div", { class: "actions" },
       h("button", { class: "btn", onclick: () => answer(false) }, "decline"),
@@ -1676,7 +1677,7 @@ $("#notifySwitch").addEventListener("click", e => {
 });
 $("#confirmSwitch").addEventListener("click", () => {
   if (!S.server.yolo) {
-    dialog({ title: "turn on yolo mode?", text: "locoder will edit files and run commands on your PC without asking, until locoder serve restarts.", okLabel: "turn on yolo", danger: true,
+    dialog({ title: "turn on yolo mode?", text: "locoder will make everyday edits and run everyday commands on your PC without asking, until locoder serve restarts. Risky ones (deleting a lot, big files, anything outside the project) still ask.", okLabel: "turn on yolo", danger: true,
       onOk: () => api.patch("/api/state", { yolo: true }).then(st => { applyState(st); toast("yolo mode on"); }).catch(fail) });
   } else {
     api.patch("/api/state", { yolo: false }).then(applyState).catch(fail);

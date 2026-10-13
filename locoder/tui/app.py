@@ -391,8 +391,8 @@ class LocoderApp(App):
 
     # -- confirm bridge (invoked via call_from_thread from TuiUI.confirm) -----
 
-    async def request_confirm(self, title: str, preview: str, lang: str) -> bool:
-        result = await self.push_screen_wait(ConfirmModal(title, preview, lang))
+    async def request_confirm(self, title: str, preview: str, lang: str, reasons: list[str] | None = None) -> bool:
+        result = await self.push_screen_wait(ConfirmModal(title, preview, lang, reasons=reasons))
         return bool(result)
 
     # -- model picker -----------------------------------------------------------

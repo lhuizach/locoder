@@ -73,10 +73,13 @@ class Notifications(private val context: Context) {
         val chatTitle = request.optString("chat_title")
         val danger = request.optBoolean("danger")
         val preview = request.optString("preview").lines().take(12).joinToString("\n").take(700)
-        val body = if (chatTitle.isNotEmpty()) "$title · $chatTitle" else title
+        val reasons = request.optJSONArray("reasons")
+        val careful = (0 until (reasons?.length() ?: 0)).joinToString("\n") { "• " + reasons!!.getString(it) }
+        val body = (if (chatTitle.isNotEmpty()) "$title · $chatTitle" else title) +
+            if (careful.isNotEmpty()) "\n$careful" else ""
 
         val builder = base(CHANNEL_APPROVALS)
-            .setContentTitle(if (danger) "locoder needs your OK - careful, destructive" else "locoder needs your OK")
+            .setContentTitle(if (danger) "locoder needs your OK - careful, risky" else "locoder needs your OK")
             .setContentText(body)
             .setStyle(Notification.BigTextStyle().bigText("$body\n\n$preview"))
             .setContentIntent(openIntent(chat, notificationId(id)))

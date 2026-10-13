@@ -64,6 +64,28 @@ devices on Tailscale. `locoder serve --unpair-all` forgets every phone.
 
 On Windows, allow Python on private networks when the firewall asks.
 
+## Safety
+
+locoder asks before it writes a file or runs a command. Yolo mode (`--yolo`,
+`/yolo`, or the switch in the phone app) skips those questions for everyday
+actions only: anything risky still asks, with the reasons shown, because
+small models don't reliably recognise a dangerous action. Risky means
+(see `locoder/safety.py`):
+
+- files: changing a file over 1,000 lines, writing a new one that big,
+  removing or rewriting most of a file, `.env`/key files, `.git/`,
+  `.locoder/`, anything outside the project folder
+- commands: deleting folders recursively, by wildcard, or more than three
+  files at once; throwing away git work or history, `git push`; touching
+  paths outside the project (absolute paths, `..`, your home folder);
+  installing packages or programs outside the project; registry, services,
+  environment variables, permissions, admin rights, stopping programs,
+  shutting down; downloading and running code; connecting to other machines
+- running a script locoder itself wrote that deletes files or runs commands
+
+These are heuristics: they catch the common ways things go wrong, not every
+possible one.
+
 ## Slash commands
 
 - `/help` - list slash commands

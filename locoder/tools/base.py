@@ -9,6 +9,7 @@ confirmation, sandboxing, and error-wrapping stay consistent across tools.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 from locoder.sandbox import Sandbox
@@ -33,12 +34,16 @@ class ToolError(Exception):
 class ToolContext:
     sandbox: Sandbox
     yolo: bool
-    # Shows `preview` (a diff, a shell command, ...) under `title` and asks
-    # the user to approve. Always returns True when yolo is set by the caller
-    # that constructs this context, but tools should call it unconditionally
-    # and let the context decide.
-    confirm: Callable[[str, str], bool]
+    # confirm(title, preview, reasons): shows `preview` (a diff, a shell
+    # command, ...) under `title` and asks the user to approve. In yolo mode
+    # it approves by itself - unless `reasons` (from locoder.safety) says the
+    # action is risky, which always asks. Tools call it unconditionally and
+    # let the context decide.
+    confirm: Callable[..., bool]
     notify: Callable[[str], None] = field(default=lambda msg: None)
+    # Files written this session, so running a script locoder just wrote
+    # can be checked like any other command.
+    written: set[Path] = field(default_factory=set)
 
 
 @dataclass

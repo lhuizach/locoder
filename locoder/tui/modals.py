@@ -56,9 +56,10 @@ class ConfirmModal(ModalScreen[bool]):
         Binding("y", "accept", show=False),
     ]
 
-    def __init__(self, title: str, preview: str, lang: str = "diff") -> None:
+    def __init__(self, title: str, preview: str, lang: str = "diff", *, reasons: Optional[list[str]] = None) -> None:
         super().__init__()
-        self._destructive = DESTRUCTIVE_MARK in title
+        self._reasons = reasons or []
+        self._destructive = bool(self._reasons) or DESTRUCTIVE_MARK in title
         self._title = title.replace(DESTRUCTIVE_MARK, "").strip()
         self._preview = preview
         self._lang = lang
@@ -66,8 +67,10 @@ class ConfirmModal(ModalScreen[bool]):
     def compose(self) -> ComposeResult:
         with Vertical(id="confirm-box"):
             if self._destructive:
-                yield Static(Text("this command looks destructive - read it carefully", style=f"bold {ERROR}"),
-                             id="confirm-warning")
+                warning = Text("careful - read this before you approve:", style=f"bold {ERROR}")
+                for reason in self._reasons or ["this command looks destructive"]:
+                    warning.append(f"\n  • {reason}", style=ERROR)
+                yield Static(warning, id="confirm-warning")
             with VerticalScroll(id="confirm-preview-box"):
                 if self._lang == "diff":
                     yield Static(Syntax(self._preview, "diff", theme="ansi_dark", word_wrap=True,
@@ -193,7 +196,7 @@ class SettingsModal(ModalScreen[Optional[AppConfig]]):
                     yield Label("context window", classes="field-label")
                     yield Input(value=str(self._config.num_ctx), id="f-num-ctx", compact=True)
             with Horizontal(classes="settings-row"):
-                yield Label(Text.assemble(("yolo", FG), ("  skip confirmations, this session only", MUTED)))
+                yield Label(Text.assemble(("yolo", FG), ("  skip approvals except risky ones, this session only", MUTED)))
                 yield Switch(value=self._config.yolo, id="f-yolo")
             yield Static("", id="settings-error")
             with Horizontal(id="settings-buttons"):

@@ -6,6 +6,7 @@ import difflib
 from pathlib import Path
 from typing import Any
 
+from locoder.safety import file_change_risks
 from locoder.tools.base import Tool, ToolContext, ToolError, ToolResult, register
 
 MAX_READ_BYTES = 2_000_000
@@ -82,11 +83,13 @@ def _write_file(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
 
     diff = _unified_diff(old_content or "", content, display) or f"(new file) {display}\n{content}"
     verb = "Overwrite" if path.exists() else "Create"
-    if not ctx.confirm(f"{verb} {display}", diff):
+    reasons = file_change_risks(ctx.sandbox.root, path, old_content, content)
+    if not ctx.confirm(f"{verb} {display}", diff, reasons):
         return ToolResult(output="user declined the write; file not changed", is_error=True)
 
     path.parent.mkdir(parents=True, exist_ok=True)
     _write_text(path, content, newline)
+    ctx.written.add(path.resolve())
     return ToolResult(output=f"wrote {len(content)} bytes to '{display}'")
 
 
@@ -111,10 +114,12 @@ def _edit_file(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
 
     new_content = content.replace(old_string, new_string, 1)
     diff = _unified_diff(content, new_content, display)
-    if not ctx.confirm(f"Edit {display}", diff):
+    reasons = file_change_risks(ctx.sandbox.root, path, content, new_content)
+    if not ctx.confirm(f"Edit {display}", diff, reasons):
         return ToolResult(output="user declined the edit; file not changed", is_error=True)
 
     _write_text(path, new_content, newline)
+    ctx.written.add(path.resolve())
     return ToolResult(output=f"applied edit to '{display}'")
 
 
