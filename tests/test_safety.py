@@ -184,3 +184,63 @@ def test_tools_remember_what_they_wrote(tmp_path: Path):
     ctx = ToolContext(sandbox=Sandbox(tmp_path), yolo=True, confirm=lambda title, preview, reasons=(): True)
     registry.dispatch("write_file", {"path": "x.py", "content": "print(1)\n"}, ctx)
     assert ctx.written == {(tmp_path / "x.py").resolve()}
+
+
+# -- deleting and generating big files (the PowerShell gaps) ----------------------------
+
+
+def test_deleting_a_big_file_is_flagged_however_it_is_spelled(tmp_path: Path):
+    big = tmp_path / "a_lines.txt"
+    big.write_text("a\n" * 1100)
+    small = tmp_path / "small.txt"
+    small.write_text("a\n" * 50)
+    why = "it deletes a_lines.txt, a 1,100-line file"
+    for command in [
+        "rm a_lines.txt",
+        "del a_lines.txt",
+        "Remove-Item a_lines.txt",
+        "ri a_lines.txt",
+        "unlink a_lines.txt",
+        'powershell -Command "Remove-Item \'a_lines.txt\'"',
+        'powershell -NoProfile -c "del a_lines.txt -Force"',
+        f'powershell -Command "Remove-Item \'{big}\'"',
+        'cmd /c del a_lines.txt',
+        "powershell -Command \"[System.IO.File]::Delete('a_lines.txt')\"",
+        "echo hi && rm a_lines.txt",
+    ]:
+        assert why in command_risks(command, tmp_path), command
+    for command in ["rm small.txt", 'powershell -Command "Remove-Item small.txt"', "type a_lines.txt"]:
+        assert command_risks(command, tmp_path) == [], command
+
+
+def test_piped_deletes_and_folders_full_of_files_are_flagged(tmp_path: Path):
+    folder = tmp_path / "docs"
+    folder.mkdir()
+    for i in range(6):
+        (folder / f"{i}.md").write_text("x")
+    assert "it deletes everything piped into it" in command_risks(
+        'powershell -Command "Get-ChildItem docs | Remove-Item"', tmp_path)
+    assert "it deletes everything piped into it" in command_risks("dir | del", tmp_path)
+    assert any("holds 6 files" in r for r in command_risks("rmdir docs", tmp_path))
+    assert command_risks("rm one.txt", tmp_path) == []  # a single small (or missing) file is fine
+
+
+def test_generating_a_huge_file_with_a_command_is_flagged(tmp_path: Path):
+    for command in [
+        "powershell -Command \"1..1100 | % { 'a' } | Set-Content a_lines.txt\"",
+        "for /L %i in (1,1,1100) do @echo a >> a.txt",
+        "seq 1 5000 > numbers.txt",
+        "python -c \"open('a.txt','w').write('a\n' * 2000)\"",
+    ]:
+        assert any("very large file" in r for r in command_risks(command, tmp_path)), command
+    assert command_risks("seq 1 50 > n.txt", tmp_path) == []
+    assert command_risks("python -c \"print(sum(range(5000)))\"", tmp_path) == []  # computing, not writing a file
+
+
+def test_broad_project_folder_warning(tmp_path: Path, monkeypatch):
+    from locoder.safety import broad_root_warning
+
+    assert broad_root_warning(tmp_path) is None
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    assert "whole home folder" in broad_root_warning(tmp_path)
+    assert "whole drive" in broad_root_warning(Path(tmp_path.anchor))

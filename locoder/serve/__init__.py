@@ -18,6 +18,7 @@ from rich.table import Table
 from rich.text import Text
 
 from locoder.display import FAINT, FG, LOGO, MUTED, SECONDARY, pixels_to_text, wordmark_bitmap
+from locoder.safety import broad_root_warning
 from locoder.serve.pairing import CODE_TTL, Pairing
 from locoder.serve.qr import pair_url, qr_text
 
@@ -68,6 +69,11 @@ def serve_main(argv: Optional[list[str]] = None) -> int:
     except ValueError as exc:
         console.print(Text(f"locoder: {exc}", style="#e5534b"))
         return 1
+
+    broad = broad_root_warning(Path.cwd())
+    if broad:
+        console.print(Text(broad, style="#d7a84a"))
+        console.print()
 
     ready = threading.Event()
     addresses: list[str] = []

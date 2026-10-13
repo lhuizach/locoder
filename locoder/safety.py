@@ -14,6 +14,7 @@ changes in.
 from __future__ import annotations
 
 import difflib
+import os
 import re
 import shlex
 from pathlib import Path, PurePath
@@ -151,15 +152,106 @@ def _command_words(command: str) -> list[str]:
         return command.split()
 
 
-def _many_deletes(command: str) -> Optional[str]:
-    """A delete command naming more than MANY_FILES files."""
-    for segment in re.split(r"&&|\|\||[;&|\n]", command):
-        words = _command_words(segment.strip())
-        if not words or not re.fullmatch(_DELETE_CMD, words[0], _I):
-            continue
-        targets = [w for w in words[1:] if not w.startswith(("-", "/"))]
-        if len(targets) > MANY_FILES:
-            return f"it deletes {len(targets)} files at once"
+_DELETE_WORDS = {"rm", "del", "erase", "rd", "rmdir", "remove-item", "ri", "unlink"}
+_WRAPPERS = [
+    re.compile(r"\b(?:powershell|pwsh)(?:\.exe)?\b.*?\s-c(?:ommand)?\s+(.+)$", _I | re.S),
+    re.compile(r"\bcmd(?:\.exe)?\s+/[ck]\s+(.+)$", _I | re.S),
+]
+_DOTNET_DELETE = re.compile(r"\b(?:File|Directory)\]::Delete\(\s*['\"]([^'\"]+)['\"]", _I)
+
+
+def _unwrap(command: str) -> list[str]:
+    """The command, plus whatever it hands to ``powershell -Command`` / ``cmd /c``."""
+    found = [command]
+    for pattern in _WRAPPERS:
+        match = pattern.search(command)
+        if match:
+            inner = match.group(1).strip()
+            if len(inner) >= 2 and inner[0] in "\"'" and inner[-1] == inner[0]:
+                inner = inner[1:-1]
+            found.append(inner.replace("\\'", "'").replace('\\"', '"'))
+    return found
+
+
+def _file_lines(path: Path) -> int:
+    try:
+        with path.open("rb") as handle:
+            return sum(chunk.count(b"\n") for chunk in iter(lambda: handle.read(1 << 20), b""))
+    except OSError:
+        return 0
+
+
+def _delete_reasons(command: str, cwd: Path) -> list[str]:
+    """What a delete command takes with it: several files, a big file, a
+    folder full of files, or whatever gets piped into it. Looks inside
+    ``powershell -Command "..."`` too."""
+    reasons: list[str] = []
+    for text in _unwrap(command):
+        for statement in re.split(r"&&|\|\||[;&\n]", text):
+            for position, part in enumerate(statement.split("|")):
+                words = _command_words(part.strip())
+                if not words or words[0].strip("\"'").lower() not in _DELETE_WORDS:
+                    continue
+                targets = [w.strip("\"'") for w in words[1:] if not w.startswith(("-", "/"))]
+                if not targets and position > 0:
+                    reasons.append("it deletes everything piped into it")
+                if len(targets) > MANY_FILES:
+                    reasons.append(f"it deletes {len(targets)} files at once")
+                for target in targets:
+                    reasons += _target_reason(target, cwd)
+        for target in _DOTNET_DELETE.findall(text):
+            reasons += _target_reason(target, cwd)
+    return reasons
+
+
+def _target_reason(target: str, cwd: Path) -> list[str]:
+    try:
+        path = (cwd / target).resolve() if not Path(target).is_absolute() else Path(target).resolve()
+        if path.is_file():
+            lines = _file_lines(path)
+            if lines > LARGE_FILE_LINES:
+                return [f"it deletes {path.name}, a {lines:,}-line file"]
+        elif path.is_dir():
+            count = 0
+            for _, _, names in os.walk(path):
+                count += len(names)
+                if count > 500:
+                    break
+            if count > MANY_FILES:
+                return [f"it deletes the folder {path.name}, which holds {count}{'+' if count > 500 else ''} files"]
+    except (OSError, ValueError):
+        pass
+    return []
+
+
+_WRITES = re.compile(r"set-content|add-content|out-file|\btee\b|>\s*[^\s&|]|writealltext|\.write\(|writelines", _I)
+_BIG_NUMBERS = [
+    re.compile(r"\b\d+\.\.(\d{4,})\b"),  # PowerShell 1..1100
+    re.compile(r"\bseq\s+(?:\d+\s+)*(\d{4,})\b", _I),
+    re.compile(r"\brange\(\s*(?:\d+\s*,\s*)?(\d{4,})\s*\)", _I),
+    re.compile(r"\bfor\s+/l\b[^)]*,\s*(\d{4,})\s*\)", _I),
+    re.compile(r"[\"']\s*\*\s*(\d{4,})\b"),  # "a\n" * 1100
+]
+
+
+def _big_generation(command: str) -> Optional[str]:
+    """A command that writes a very large file (a loop or range over thousands of lines)."""
+    if not _WRITES.search(command):
+        return None
+    for pattern in _BIG_NUMBERS:
+        for match in pattern.finditer(command):
+            if int(match.group(1)) > LARGE_FILE_LINES:
+                return f"it generates a very large file (about {int(match.group(1)):,} lines)"
+    return None
+
+
+def broad_root_warning(root: Path) -> Optional[str]:
+    """A warning when locoder runs somewhere so broad that "inside the project" means almost everything."""
+    root = Path(root).resolve()
+    if root == Path.home().resolve() or root.parent == root:
+        what = "your whole home folder" if root != root.parent else "a whole drive"
+        return (f"locoder is running in {root}, so its project folder is {what} - the safety checks treat "
+                "everything in it as part of the project. Run it from a project's own folder instead.")
     return None
 
 
@@ -198,9 +290,10 @@ def command_risks(command: str, root: Path, cwd: Optional[Path] = None,
     if re.search(r"(?:^|[\s\\/\"'])\.?venv[\\/]", command):
         # pip from the project's own virtualenv installs inside this folder.
         reasons = [r for r in reasons if "Python packages" not in r]
-    many = _many_deletes(command)
-    if many:
-        reasons.append(many)
+    reasons += _delete_reasons(command, cwd)
+    big = _big_generation(command)
+    if big:
+        reasons.append(big)
     reasons += _outside_reasons(command, root, cwd)
     if re.search(r"\b(?:python\d*|py|node|deno|bun)(?:\.exe)?\s+(?:-\w+\s+)*-[ce]\s", command, _I):
         reasons += [f"its inline code {r}" for r in code_risks(command)]

@@ -18,6 +18,7 @@ from locoder.context import ContextManager
 from locoder.providers.base import ModelProvider, ProviderError
 from locoder.providers.registry import create_provider
 from locoder.recent import record_project
+from locoder.safety import broad_root_warning
 from locoder.sandbox import Sandbox
 from locoder.session import SessionStore
 from locoder.ui import UI
@@ -73,6 +74,10 @@ def _run(args: argparse.Namespace, project_root: Path) -> int | Path:
         num_ctx_override=args.num_ctx,
         yolo_override=args.yolo,
     )
+
+    broad = broad_root_warning(project_root)
+    if broad:
+        config.warnings.append(broad)
 
     ui = UI()
 
