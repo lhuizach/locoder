@@ -120,6 +120,12 @@ class ModelProvider(ABC):
 
     name: str = "provider"
 
+    # A local model can sit silent for minutes before its first word - reading
+    # a long prompt, thinking, or running partly on the CPU - so waiting for
+    # the next chunk of a streamed answer is allowed far longer than `timeout`
+    # (which still covers connecting and the quick calls).
+    STREAM_PATIENCE = 900.0
+
     def __init__(
         self,
         *,
@@ -136,6 +142,16 @@ class ModelProvider(ABC):
         self.num_ctx = num_ctx
         self.api_key = api_key
         self.timeout = timeout
+
+    def chat_timeout(self) -> tuple[float, float]:
+        """(connect, read) timeouts for a chat request."""
+        return (min(self.timeout, 15.0), max(self.timeout, self.STREAM_PATIENCE))
+
+    def silence_message(self) -> str:
+        minutes = max(self.timeout, self.STREAM_PATIENCE) / 60
+        return (f"the model said nothing for {minutes:.0f} minutes - it may be overloaded, or the context "
+                "window (num_ctx) is too big for your GPU and part of the model runs slowly on the CPU. "
+                "Try a smaller num_ctx (32768 is plenty for most work)")
 
     @abstractmethod
     def chat(

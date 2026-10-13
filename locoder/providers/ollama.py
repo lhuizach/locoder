@@ -67,9 +67,12 @@ class OllamaProvider(ModelProvider):
                 json=payload,
                 headers=self._headers(),
                 stream=stream,
-                timeout=self.timeout,
+                timeout=self.chat_timeout(),
             )
             resp.raise_for_status()
+        except requests.exceptions.ReadTimeout:
+            yield StreamEvent(type="error", error=ProviderError(f"ollama: {self.silence_message()}"))
+            return
         except requests.RequestException as exc:
             yield StreamEvent(type="error", error=ProviderError(f"ollama request failed: {exc}"))
             return
@@ -101,6 +104,9 @@ class OllamaProvider(ModelProvider):
                         "prompt_tokens": chunk.get("prompt_eval_count", 0),
                         "completion_tokens": chunk.get("eval_count", 0),
                     }
+            except requests.exceptions.ReadTimeout:
+                yield StreamEvent(type="error", error=ProviderError(f"ollama: {self.silence_message()}"))
+                return
             except (json.JSONDecodeError, requests.RequestException) as exc:
                 yield StreamEvent(type="error", error=ProviderError(f"ollama stream error: {exc}"))
                 return

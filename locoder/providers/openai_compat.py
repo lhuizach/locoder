@@ -87,7 +87,9 @@ class OpenAICompatProvider(ModelProvider):
         for attempt in range(MAX_RATE_LIMIT_RETRIES + 1):
             try:
                 resp = requests.post(url, json=payload, headers=self._headers(), stream=stream,
-                                     timeout=self.timeout)
+                                     timeout=self.chat_timeout())
+            except requests.exceptions.ReadTimeout as exc:
+                raise ProviderError(self.silence_message()) from exc
             except requests.RequestException as exc:
                 raise ProviderError(f"request to {self.base_url} failed: {exc}") from exc
             if resp.status_code == 429 and attempt < MAX_RATE_LIMIT_RETRIES:
@@ -156,6 +158,9 @@ class OpenAICompatProvider(ModelProvider):
         try:
             try:
                 if stream:
+                    # Server-sent events are UTF-8; without this, requests guesses
+                    # Latin-1 (or gives raw bytes) when the server names no charset.
+                    resp.encoding = "utf-8"
                     for raw_line in resp.iter_lines(decode_unicode=True):
                         if not raw_line or not raw_line.startswith("data:"):
                             continue
@@ -200,6 +205,9 @@ class OpenAICompatProvider(ModelProvider):
                             "prompt_tokens": body["usage"].get("prompt_tokens", 0),
                             "completion_tokens": body["usage"].get("completion_tokens", 0),
                         }
+            except requests.exceptions.ReadTimeout:
+                yield StreamEvent(type="error", error=ProviderError(self.silence_message()))
+                return
             except (json.JSONDecodeError, requests.RequestException) as exc:
                 yield StreamEvent(type="error", error=ProviderError(f"stream error: {exc}"))
                 return
