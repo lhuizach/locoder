@@ -68,6 +68,7 @@ TOOL_VERBS = {
     "list_dir": "List",
     "search_files": "Search",
     "run_command": "Run",
+    "send_file": "Send",
 }
 
 # All cp1252-safe.
@@ -88,7 +89,7 @@ def tool_target(name: str, args: dict[str, Any]) -> str:
         return _short(args.get("command", ""), 70)
     if name == "list_dir":
         return str(args.get("path") or ".")
-    if name in ("read_file", "write_file", "edit_file"):
+    if name in ("read_file", "write_file", "edit_file", "send_file"):
         target = str(args.get("path", ""))
         start, end = args.get("start_line"), args.get("end_line")
         if name == "read_file" and (start or end):
@@ -122,6 +123,8 @@ def tool_summary(name: str, args: dict[str, Any], result: ToolResult) -> str:
         hits = [line for line in out.splitlines() if not line.startswith("...")]
         more = "+" if len(hits) < _lines(out) else ""
         return f"{len(hits)}{more} match{'' if len(hits) == 1 and not more else 'es'}"
+    if name == "send_file":
+        return "sent" if not result.is_error else "failed"
     if name == "run_command":
         first = out.splitlines()[0] if out else ""
         return "exit " + first[len("exit code: "):] if first.startswith("exit code: ") else "done"

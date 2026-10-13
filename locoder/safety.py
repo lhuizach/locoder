@@ -50,6 +50,36 @@ def _inside(path: PurePath, root: PurePath) -> bool:
         return False
 
 
+# -- sending files to the phone ----------------------------------------------------
+
+MAX_SEND_BYTES = 8_000_000
+
+
+def sendable_problem(root: Path, path: Path) -> Optional[str]:
+    """Why ``path`` can't be sent to the phone (None: it can). Secrets and
+    locoder's own data never leave the PC this way."""
+    name = path.name
+    if not _inside(path, root):
+        return "that file is outside the project folder"
+    if not path.is_file():
+        return f"'{name}' is not a file"
+    if name == ".env" or name.startswith(".env.") or name in SENSITIVE_NAMES or path.suffix.lower() in SENSITIVE_SUFFIXES:
+        return f"'{name}' may hold passwords or keys, so it isn't sent"
+    try:
+        parts = Path(path).resolve().relative_to(Path(root).resolve()).parts
+    except ValueError:
+        parts = ()
+    if any(part in PROTECTED_DIRS for part in parts[:-1]):
+        return "files inside .git, .locoder and .ssh aren't sent"
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        return f"can't read '{name}': {exc}"
+    if size > MAX_SEND_BYTES:
+        return f"'{name}' is {size / 1e6:.1f} MB; the limit is {MAX_SEND_BYTES // 1_000_000} MB"
+    return None
+
+
 # -- file changes ------------------------------------------------------------------
 
 

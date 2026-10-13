@@ -9,6 +9,8 @@ everything after the last one it saw.
 
 from __future__ import annotations
 
+import base64
+import mimetypes
 import platform
 import threading
 import time
@@ -27,7 +29,8 @@ from locoder.context import ContextManager
 from locoder.providers.base import Message, ProviderError
 from locoder.providers.registry import create_provider
 from locoder.recent import recent_files, recent_projects, record_project, relative_time
-from locoder.sandbox import Sandbox
+from locoder.safety import sendable_problem
+from locoder.sandbox import Sandbox, SandboxViolation
 from locoder.serve.transcript import to_entries
 from locoder.serve.web_ui import ConfirmRequest, WebUI, preview_text
 from locoder.session import TITLE_PREVIEW_LEN, SessionStore
@@ -357,6 +360,28 @@ class Hub:
         state = self.state()
         self.publish("state", state={k: state[k] for k in ("mode", "model", "temperature", "yolo")})
         return state
+
+    # -- files for the phone -----------------------------------------------------
+
+    def read_file(self, path: str) -> dict[str, Any]:
+        """A project file for the phone to download (what send_file offered).
+        Same checks as the tool: inside the project, no secrets, a size limit."""
+        if not path:
+            raise HubError(400, "no file given")
+        try:
+            target = self.sandbox.resolve(path, must_exist=True)
+        except (SandboxViolation, OSError) as exc:
+            raise HubError(404, str(exc)) from None
+        problem = sendable_problem(self.root, target)
+        if problem:
+            raise HubError(403, problem)
+        mime = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+        return {
+            "name": target.name,
+            "size": target.stat().st_size,
+            "mime": mime,
+            "data": base64.b64encode(target.read_bytes()).decode("ascii"),
+        }
 
     # -- the model in memory (Ollama) -------------------------------------------
 

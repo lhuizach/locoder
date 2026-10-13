@@ -64,6 +64,12 @@ devices on Tailscale. `locoder serve --unpair-all` forgets every phone.
 
 On Windows, allow Python on private networks when the firewall asks.
 
+**Files to your phone:** ask the model to "send me todo.html" and it shows a
+file card in the chat with **save** (into the phone's Downloads folder) and,
+for HTML files, **open**, which tries the page right in the app (in a sandbox
+with no network, and without access to the app itself). Files up to 8 MB;
+secrets (`.env`, keys) and anything in `.git`/`.locoder` are never sent.
+
 ## Safety
 
 locoder asks before it writes a file or runs a command. Yolo mode (`--yolo`,

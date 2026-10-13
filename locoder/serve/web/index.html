@@ -190,6 +190,17 @@
   .answer code { font: 600 13px var(--mono); background: var(--raise); padding: 1px 5px; border-radius: 5px; color: #7fd4ff; }
   .answer pre { font: 600 12.5px/1.5 var(--mono); background: var(--raise); padding: 10px 12px; border-radius: 10px; overflow-x: auto; margin: 6px 0 10px; }
   .answer pre code { background: none; padding: 0; color: var(--fg); }
+  /* a file the model sent: save it, or open it (HTML) */
+  .filecard { display: flex; align-items: center; gap: 10px; margin: 6px 0 8px 18px; padding: 10px 12px; border: 1px solid var(--accent); border-radius: var(--r); }
+  .filecard .grow { flex: 1; min-width: 0; }
+  .filecard .fname { font: 800 14px var(--sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .filecard .fsize { font: 600 12px var(--sans); color: var(--muted); }
+  .filecard .btn { height: 36px; padding: 0 14px; }
+
+  /* the HTML preview */
+  .preview { position: absolute; inset: 0; z-index: 15; background: var(--bg); display: flex; flex-direction: column; }
+  .preview iframe { flex: 1; min-height: 0; width: 100%; border: 0; background: #fff; color-scheme: light; }
+  .preview .sub { font: 600 11px var(--sans); color: var(--muted); }
   .note { font: 600 13px/1.4 var(--sans); color: var(--muted); padding: 3px 0; }
   .note.warn { color: var(--warn); }
   .note.error { color: var(--error); }
@@ -428,6 +439,17 @@
       <div style="height:30px"></div>
     </div>
   </section>
+
+  <div class="preview" id="preview" hidden>
+    <div class="topbar">
+      <button class="iconbtn" id="previewClose" aria-label="close preview">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+      <div class="grow"><div class="chat-title" id="previewTitle"></div><div class="sub">preview - what you add isn't saved here; save the file to keep it</div></div>
+      <button class="btn" id="previewSave" style="height:36px;padding:0 14px">save</button>
+    </div>
+    <iframe id="previewFrame" sandbox="allow-scripts allow-forms allow-modals allow-popups" title="preview"></iframe>
+  </div>
 
   <div class="scrim" id="scrim"></div>
   <div class="sheet" id="sheet"><div class="grab"></div><h3 id="sheetTitle"></h3><div class="scroll" id="sheetBody"></div></div>
@@ -1298,14 +1320,67 @@ function renderEntries(entries) {
 function userMsg(text) {
   return h("div", { class: "msg-user" }, h("div", { class: "who" }, "you"), h("div", {}, text));
 }
-function toolView({ verb, target, summary, output, status = "ok" }) {
+function toolView({ verb, target, summary, output, status = "ok", file = null }) {
   const icon = { ok: "•", err: "×", declined: "!", pending: "·" }[status] || "•";
   const el = h("div", { class: `tool ${status === "ok" ? "" : status}` },
     h("div", { class: "line" }, h("span", { class: "icon" }, icon), h("span", { class: "verb" }, verb), h("span", { class: "target" }, target), h("span", { class: "sum" }, summary || "")),
-    h("div", { class: "out" }, output || ""));
+    h("div", { class: "out" }, output || ""),
+    file ? fileCard(file) : null);
   el.addEventListener("click", () => output && el.classList.toggle("open"));
   return el;
 }
+function fileCard(file) {
+  const stop = fn => e => { e.stopPropagation(); fn(); };
+  return h("div", { class: "filecard", onclick: e => e.stopPropagation() },
+    h("div", { class: "grow" }, h("div", { class: "fname" }, file.name), h("div", { class: "fsize" }, fmtSize(file.size))),
+    /\.html?$/i.test(file.name) ? h("button", { class: "btn", onclick: stop(() => openPreview(file)) }, "open") : null,
+    h("button", { class: "btn accent", onclick: stop(() => saveFile(file)) }, "save"));
+}
+
+/* ---------- files the model sends: save to the phone, or try an HTML page ---------- */
+const fmtSize = n => n == null ? "" : n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`;
+const getFile = file => api.get("/api/files/get?path=" + encodeURIComponent(file.path));
+async function saveFile(file) {
+  try {
+    const f = await getFile(file);
+    if (Android?.saveFile) {
+      const saved = Android.saveFile(f.name, f.data, f.mime);  // into the Downloads folder
+      toast(saved ? `saved to Downloads: ${saved}` : "couldn't save it - check the phone's storage");
+    } else {
+      const url = URL.createObjectURL(new Blob([b64ToBytes(f.data)], { type: f.mime }));
+      const a = h("a", { href: url, download: f.name });
+      document.body.append(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      toast(`downloading ${f.name}`);
+    }
+  } catch (e) { fail(e); }
+}
+// The page runs in a sandbox with no access to this app (so not to your
+// pairing key either) and no network. Its localStorage is stood in for by
+// memory, since a sandboxed page isn't allowed the real one.
+const PREVIEW_HEAD = '<meta http-equiv="Content-Security-Policy" content="default-src https: data: blob: \'unsafe-inline\' \'unsafe-eval\'; connect-src \'none\'; form-action \'none\'">'
+  + '<script>(function(){var mk=function(){var m={};return{getItem:function(k){return Object.prototype.hasOwnProperty.call(m,k)?m[k]:null},setItem:function(k,v){m[k]=String(v)},removeItem:function(k){delete m[k]},clear:function(){m={}},key:function(i){return Object.keys(m)[i]||null},get length(){return Object.keys(m).length}}};["localStorage","sessionStorage"].forEach(function(n){try{window[n].getItem("x")}catch(e){try{Object.defineProperty(window,n,{value:mk(),configurable:true})}catch(e2){}}})})()<\/script>';
+let previewing = null;
+async function openPreview(file) {
+  try {
+    const f = await getFile(file);
+    let html = td.decode(b64ToBytes(f.data));
+    html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, m => m + PREVIEW_HEAD) : PREVIEW_HEAD + html;
+    previewing = file;
+    $("#previewTitle").textContent = f.name;
+    $("#previewFrame").srcdoc = html;
+    $("#preview").hidden = false;
+  } catch (e) { fail(e); }
+}
+function closePreview() {
+  $("#preview").hidden = true;
+  $("#previewFrame").srcdoc = "";
+  previewing = null;
+}
+$("#previewClose").addEventListener("click", closePreview);
+$("#previewSave").addEventListener("click", () => previewing && saveFile(previewing));
 function md(src) {
   const inline = s => esc(s)
     .replace(/`([^`]+)`/g, "<code>$1</code>")
@@ -1694,6 +1769,10 @@ $("#unpairBtn").addEventListener("click", () => dialog({
 /* ---------- Android hooks ---------- */
 // Back button: true if handled here, false lets the app close.
 window.onAndroidBack = function () {
+  if (!$("#preview").hidden) {
+    closePreview();
+    return true;
+  }
   if ($("#sheet").classList.contains("show") || $("#dialog").classList.contains("show")) {
     closeOverlays();
     return true;

@@ -2,8 +2,12 @@ package com.locoder.mobile
 
 import android.Manifest
 import android.app.Activity
+import android.content.ContentValues
 import android.os.Build
+import android.provider.MediaStore
+import android.util.Base64
 import android.webkit.JavascriptInterface
+import android.webkit.MimeTypeMap
 import android.webkit.WebView
 import com.google.zxing.integration.android.IntentIntegrator
 import java.net.DatagramPacket
@@ -73,6 +77,43 @@ class Bridge(private val activity: Activity, private val webView: WebView) {
             activity.runOnUiThread {
                 activity.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
             }
+        }
+    }
+
+    /**
+     * Saves a file the model sent into the phone's Downloads folder. Returns
+     * the name it was saved under (Android adds " (1)" if one exists), or ""
+     * if it couldn't (needs Android 10+, where no storage permission is
+     * needed to add to Downloads). [mime] is ignored in favour of Android's
+     * own idea of the file type, so it never renames the file to fit.
+     */
+    @JavascriptInterface
+    @Suppress("UNUSED_PARAMETER")
+    fun saveFile(name: String, base64Data: String, mime: String): String {
+        if (Build.VERSION.SDK_INT < 29) return ""
+        return try {
+            val bytes = Base64.decode(base64Data, Base64.DEFAULT)
+            val safeName = name.substringAfterLast('/').substringAfterLast('\\').ifBlank { "locoder-file" }
+            val type = MimeTypeMap.getSingleton().getMimeTypeFromExtension(safeName.substringAfterLast('.', "").lowercase())
+                ?: "application/octet-stream"
+            val values = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, safeName)
+                put(MediaStore.Downloads.MIME_TYPE, type)
+                put(MediaStore.Downloads.IS_PENDING, 1)
+            }
+            val resolver = activity.contentResolver
+            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return ""
+            val written = resolver.openOutputStream(uri)?.use { it.write(bytes); true } ?: false
+            if (!written) {
+                resolver.delete(uri, null, null)
+                return ""
+            }
+            resolver.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
+            resolver.query(uri, arrayOf(MediaStore.Downloads.DISPLAY_NAME), null, null, null)?.use {
+                if (it.moveToFirst()) it.getString(0) else safeName
+            } ?: safeName
+        } catch (e: Exception) {
+            ""
         }
     }
 

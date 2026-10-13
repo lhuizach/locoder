@@ -40,6 +40,8 @@ class ConfirmRequest:
 
 
 class WebUI:
+    can_send_files = True  # the phone app can download what send_file offers
+
     def __init__(self, hub: "Hub", chat_id: str) -> None:
         self.hub = hub
         self.chat_id = chat_id

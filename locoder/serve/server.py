@@ -314,6 +314,9 @@ class Handler(BaseHTTPRequestHandler):
     def switch_project(self) -> dict[str, Any]:
         return self.server.hub.switch_project(str(self._body().get("path", "")))
 
+    def file(self) -> dict[str, Any]:
+        return self.server.hub.read_file(self.query.get("path", [""])[0])
+
     def files(self) -> dict[str, Any]:
         return {"files": self.server.hub.recent_files()}
 
@@ -385,6 +388,7 @@ ROUTES = [
     Route("GET", "/api/projects", Handler.projects),
     Route("POST", "/api/projects/switch", Handler.switch_project),
     Route("GET", "/api/files/recent", Handler.files),
+    Route("GET", "/api/files/get", Handler.file),
     Route("GET", "/api/events", Handler.events),
 ]
 

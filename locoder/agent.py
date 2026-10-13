@@ -78,7 +78,7 @@ class AgentMode(str, Enum):
 
 
 MODE_ORDER = [AgentMode.BUILD, AgentMode.ASK, AgentMode.PLAN]
-READ_ONLY_TOOLS = {"read_file", "list_dir", "search_files"}
+READ_ONLY_TOOLS = {"read_file", "list_dir", "search_files", "send_file"}
 
 MODE_COLORS = {
     AgentMode.BUILD: "#4a9eff",
@@ -130,6 +130,7 @@ class Agent:
             confirm=self._confirm,
             notify=ui.info,
         )
+        self.tool_ctx.can_send_files = getattr(ui, "can_send_files", False) is True
         self._cancel_requested = threading.Event()
 
     def _confirm(self, title: str, preview: str, reasons: Sequence[str] = ()) -> bool:
@@ -164,6 +165,9 @@ class Agent:
 
     def _tool_schemas(self) -> list[dict]:
         schemas = tools_registry.all_schemas()
+        if not self.tool_ctx.can_send_files:
+            # Nobody to send to: don't offer it, a small model would only get confused.
+            schemas = [s for s in schemas if s["function"]["name"] != "send_file"]
         if self.mode == AgentMode.BUILD:
             return schemas
         return [s for s in schemas if s["function"]["name"] in READ_ONLY_TOOLS]

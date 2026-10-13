@@ -4,6 +4,7 @@ text, and one line per tool call (verb, target, how it went, output).
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from locoder.display import TOOL_VERBS, tool_summary, tool_target
@@ -24,7 +25,7 @@ def tool_entry(name: str, args: dict[str, Any], result: ToolResult) -> dict[str,
     output = result.output
     if len(output) > MAX_OUTPUT:
         output = output[:MAX_OUTPUT] + f"\n... ({len(result.output) - MAX_OUTPUT:,} more characters)"
-    return {
+    entry = {
         "type": "tool",
         "name": name,
         "verb": TOOL_VERBS.get(name, name),
@@ -33,6 +34,12 @@ def tool_entry(name: str, args: dict[str, Any], result: ToolResult) -> dict[str,
         "status": status,
         "output": output,
     }
+    if name == "send_file" and status == "ok" and args.get("path"):
+        # The phone shows a Save / Open card for it; the path is all it needs
+        # (the server re-checks it on download, and it survives restarts).
+        entry["file"] = {"path": str(args["path"]), "name": Path(str(args["path"])).name,
+                         "size": result.meta.get("size")}
+    return entry
 
 
 def _looks_failed(name: str, output: str) -> bool:
@@ -40,6 +47,8 @@ def _looks_failed(name: str, output: str) -> bool:
     text = output.lstrip()
     if "This exact call already failed" in text:
         return True
+    if name == "send_file":
+        return "is ready on the user's phone" not in text
     if name == "run_command" and text.startswith("exit code: "):
         return not text.startswith("exit code: 0")
     return text.lower().startswith(_ERROR_PREFIXES)

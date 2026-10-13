@@ -44,6 +44,8 @@ class ToolContext:
     # Files written this session, so running a script locoder just wrote
     # can be checked like any other command.
     written: set[Path] = field(default_factory=set)
+    # True when a phone is attached (locoder serve): send_file only works then.
+    can_send_files: bool = False
 
 
 @dataclass
