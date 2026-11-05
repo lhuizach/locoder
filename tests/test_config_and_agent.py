@@ -25,6 +25,21 @@ def test_default_model(tmp_path: Path):
     assert config.model == "qwen3.5:4b"
 
 
+def test_starter_project_config_doesnt_hide_global_settings(tmp_path: Path, monkeypatch):
+    # e.g. locoder in a VM using the host's Ollama: base_url set globally
+    monkeypatch.delenv("LOCODER_BASE_URL", raising=False)
+    global_path = tmp_path / "global.yaml"
+    _write(global_path, {"base_url": "http://10.0.2.2:11434", "temperature": 0.7})
+    project = tmp_path / "project"
+    ensure_project_config(project)
+
+    config = AppConfig.load(project, global_config_path=global_path)
+
+    assert config.base_url == "http://10.0.2.2:11434"
+    assert config.temperature == 0.7
+    assert not config.warnings
+
+
 def test_project_config_cannot_enable_yolo_or_widen_sandbox(tmp_path: Path, monkeypatch):
     for var in ("LOCODER_PROVIDER", "LOCODER_MODEL", "LOCODER_BASE_URL", "LOCODER_API_KEY"):
         monkeypatch.delenv(var, raising=False)

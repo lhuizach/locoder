@@ -31,27 +31,31 @@ CHAT_LAYOUTS = ("left", "center", "right")
 # Keys the settings screen edits, and so writes back to the project file.
 PROJECT_SETTINGS_KEYS = ("provider", "model", "base_url", "temperature", "num_ctx", "think")
 
+# Everything is commented out: a value set here would hide the same setting
+# in ~/.locoder/config.yaml (a starter file that set base_url: localhost
+# stopped a VM from reaching Ollama on its host, for one). Uncomment only
+# what this project needs to do differently.
 CONFIG_TEMPLATE = f"""\
-# locoder configuration
+# locoder settings for this project. Anything left commented out comes from
+# ~/.locoder/config.yaml, or locoder's defaults (shown here).
 # provider: one of ollama, groq, openai, llamacpp, vllm, lmstudio
-provider: ollama
-model: {DEFAULT_MODEL}
-base_url: http://localhost:11434
-temperature: 0.2
+# provider: ollama
+# model: {DEFAULT_MODEL}
+# base_url: http://localhost:11434
+# temperature: 0.2
 # context window size (tokens) of the selected model - check the model's max
 # with `ollama show <model>` before raising this; bigger uses more VRAM/RAM
-num_ctx: 32768
+# num_ctx: 32768
 # fraction of num_ctx at which old turns get summarized/truncated
-context_compaction_threshold: 0.85
+# context_compaction_threshold: 0.85
 # api_key: only needed for hosted OpenAI-compatible endpoints
-api_key: null
-timeout: 120
+# timeout: 120
 # think: false skips the model's long "thinking" step - much faster answers,
 # a bit less careful on hard problems (only affects models that think, on Ollama)
-think: true
+# think: true
 # web: true lets the model search the web and read pages (off by default:
 # queries go to the internet). Toggle it for a session with /web.
-web: false
+# web: false
 # brave_api_key / tavily_api_key: optional; put them in ~/.locoder/config.yaml,
 # not here. Without one, search uses DuckDuckGo, with Wikipedia as backup.
 # yolo and allowed_paths are ignored here for safety (a cloned repo could ship
