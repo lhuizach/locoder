@@ -26,6 +26,11 @@ dev = ["pytest>=8.0"]
 
 [project.scripts]
 locoder = "locoder.cli:main"
+lochat = "locoder.lochat:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["locoder"]
+
+[tool.pytest.ini_options]
+# Only locoder's own tests (Models/ holds other projects' code and tests).
+testpaths = ["tests"]

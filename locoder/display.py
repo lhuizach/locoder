@@ -69,6 +69,17 @@ TOOL_VERBS = {
     "search_files": "Search",
     "run_command": "Run",
     "send_file": "Send",
+    "find_files": "Find",
+    "move_path": "Move",
+    "delete_path": "Delete",
+    "start_process": "Start",
+    "read_process": "Output",
+    "stop_process": "Stop",
+    "update_todos": "Plan",
+    "ask_user": "Ask",
+    "notify_user": "Notify",
+    "web_search": "Search",
+    "web_fetch": "Fetch",
 }
 
 # All cp1252-safe.
@@ -89,6 +100,31 @@ def tool_target(name: str, args: dict[str, Any]) -> str:
         return _short(args.get("command", ""), 70)
     if name == "list_dir":
         return str(args.get("path") or ".")
+    if name == "read_file" and args.get("paths"):
+        paths = args["paths"] if isinstance(args["paths"], list) else [args["paths"]]
+        return _short(", ".join(str(p) for p in paths), 70)
+    if name == "find_files":
+        path = args.get("path")
+        return f"{args.get('pattern', '')}" + (f" in {path}" if path and path != "." else "")
+    if name == "move_path":
+        return f"{args.get('source', '')} -> {args.get('destination', '')}"
+    if name == "delete_path":
+        return str(args.get("path", ""))
+    if name == "start_process":
+        return _short(args.get("command", ""), 70)
+    if name in ("read_process", "stop_process"):
+        return f"process {args['id']}" if args.get("id") not in (None, "") else "all"
+    if name == "update_todos":
+        todos = args.get("todos") or []
+        return f"{len(todos)} step{'s' if len(todos) != 1 else ''}" if isinstance(todos, list) else ""
+    if name == "ask_user":
+        return _short(args.get("question", ""), 70)
+    if name == "notify_user":
+        return _short(args.get("title", ""), 60)
+    if name == "web_search":
+        return f'"{_short(args.get("query", ""), 60)}"'
+    if name == "web_fetch":
+        return _short(args.get("url", ""), 70)
     if name in ("read_file", "write_file", "edit_file", "send_file"):
         target = str(args.get("path", ""))
         start, end = args.get("start_line"), args.get("end_line")
@@ -113,8 +149,31 @@ def tool_summary(name: str, args: dict[str, Any], result: ToolResult) -> str:
             return "exit " + first[len("exit code: "):]
         # First clause only; the full message is one click away.
         return _short(first.split(" - ")[0], 60)
+    if name == "read_file" and args.get("paths"):
+        return f"{sum(line.startswith('=== ') for line in out.splitlines())} files"
     if name == "read_file":
         return "empty" if out == "(empty file)" else f"{_lines(out)} lines"
+    if name == "find_files":
+        if out == "no files found":
+            return "none found"
+        hits = [line for line in out.splitlines() if not line.startswith("...")]
+        return f"{len(hits)}{'+' if len(hits) < _lines(out) else ''} found"
+    if name in ("move_path", "delete_path", "notify_user"):
+        return {"move_path": "moved", "delete_path": "deleted", "notify_user": "sent"}[name]
+    if name in ("start_process", "read_process", "stop_process"):
+        first = out.splitlines()[0] if out else ""
+        if first.startswith("stopped"):
+            return "stopped"
+        return first.split(": ", 1)[1] if first.startswith("process") and ": " in first else "done"
+    if name == "update_todos":
+        last = out.splitlines()[-1] if out else ""
+        return last.strip("()") if last.startswith("(") else "updated"
+    if name == "ask_user":
+        return "answered" if out.startswith("The user answered") else "no answer"
+    if name == "web_search":
+        return f"{result.meta.get('results', 0)} results" if result.meta.get("results") else "no results"
+    if name == "web_fetch":
+        return f"{len(out):,} chars"
     if name == "list_dir":
         return "empty" if out == "(empty directory)" else f"{_lines(out)} entries"
     if name == "search_files":
@@ -129,6 +188,9 @@ def tool_summary(name: str, args: dict[str, Any], result: ToolResult) -> str:
         first = out.splitlines()[0] if out else ""
         return "exit " + first[len("exit code: "):] if first.startswith("exit code: ") else "done"
     if name == "edit_file":
+        if args.get("edits"):
+            edits = args["edits"] if isinstance(args["edits"], list) else []
+            return f"{len(edits)} edits"
         return f"+{_lines(args.get('new_string', ''))} -{_lines(args.get('old_string', ''))}"
     if name == "write_file":
         if "no changes" in out:

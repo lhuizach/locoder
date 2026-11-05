@@ -12,13 +12,15 @@ import android.os.Build
 import org.json.JSONObject
 
 /**
- * The app's notifications. Three channels: "approvals" (pops up - a task on
- * your PC is blocked until you answer), "tasks" (a task finished) and
+ * The app's notifications. Four channels: "approvals" (pops up - a task on
+ * your PC is blocked until you answer an approval or a question), "tasks" (a
+ * task finished), "updates" (progress the model reports on a long task) and
  * "status" (the quiet one Android requires while [WatchService] runs).
  */
 class Notifications(private val context: Context) {
 
     private val manager = context.getSystemService(NotificationManager::class.java)
+    private val appName = context.getString(R.string.app_name)  // locoder or lochat
 
     init {
         manager.createNotificationChannel(
@@ -32,8 +34,13 @@ class Notifications(private val context: Context) {
             },
         )
         manager.createNotificationChannel(
+            NotificationChannel(CHANNEL_UPDATES, "Progress updates", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                description = "Updates the model sends during a long task"
+            },
+        )
+        manager.createNotificationChannel(
             NotificationChannel(CHANNEL_STATUS, "Watching a task", NotificationManager.IMPORTANCE_MIN).apply {
-                description = "Shown while locoder keeps an eye on a task running on your PC"
+                description = "Shown while $appName keeps an eye on a task running on your PC"
                 setShowBadge(false)
             },
         )
@@ -79,7 +86,7 @@ class Notifications(private val context: Context) {
             if (careful.isNotEmpty()) "\n$careful" else ""
 
         val builder = base(CHANNEL_APPROVALS)
-            .setContentTitle(if (danger) "locoder needs your OK - careful, risky" else "locoder needs your OK")
+            .setContentTitle(if (danger) "$appName needs your OK - careful, risky" else "$appName needs your OK")
             .setContentText(body)
             .setStyle(Notification.BigTextStyle().bigText("$body\n\n$preview"))
             .setContentIntent(openIntent(chat, notificationId(id)))
@@ -103,6 +110,47 @@ class Notifications(private val context: Context) {
     }
 
     fun cancelApproval(requestId: String) = manager.cancel(notificationId(requestId))
+
+    /** The model asked a question (ask_user); the task waits until it's answered in the app. */
+    fun question(question: JSONObject) {
+        if (!hasPermission()) return
+        val id = question.optString("id")
+        val chat = question.optString("chat")
+        val text = question.optString("question")
+        val options = question.optJSONArray("options")
+        val choices = (0 until (options?.length() ?: 0)).joinToString("\n") { "• " + options!!.getString(it) }
+        val body = if (choices.isNotEmpty()) "$text\n$choices" else text
+        manager.notify(
+            notificationId(id),
+            base(CHANNEL_APPROVALS)
+                .setContentTitle("$appName has a question")
+                .setContentText(text)
+                .setStyle(Notification.BigTextStyle().bigText(body))
+                .setContentIntent(openIntent(chat, notificationId(id)))
+                .setAutoCancel(true)
+                .setCategory(Notification.CATEGORY_REMINDER)
+                .build(),
+        )
+    }
+
+    /** A progress update the model sent with notify_user. */
+    fun update(event: JSONObject) {
+        if (!hasPermission()) return
+        val chat = event.optString("chat")
+        val message = event.optString("message")
+        val key = "update:$chat:${event.optLong("seq")}"
+        manager.notify(
+            notificationId(key),
+            base(CHANNEL_UPDATES)
+                .setContentTitle(event.optString("title").ifEmpty { appName })
+                .setContentText(message)
+                .setStyle(Notification.BigTextStyle().bigText(message))
+                .setContentIntent(openIntent(chat, notificationId(key)))
+                .setAutoCancel(true)
+                .setCategory(Notification.CATEGORY_STATUS)
+                .build(),
+        )
+    }
 
     /** A task finished (or stopped, or failed). */
     fun finished(event: JSONObject) {
@@ -132,6 +180,7 @@ class Notifications(private val context: Context) {
     companion object {
         const val CHANNEL_APPROVALS = "approvals"
         const val CHANNEL_TASKS = "tasks"
+        const val CHANNEL_UPDATES = "updates"
         const val CHANNEL_STATUS = "status"
         const val STATUS_ID = 1
 

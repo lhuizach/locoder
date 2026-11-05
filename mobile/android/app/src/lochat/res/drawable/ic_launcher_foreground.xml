@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The lochat logo: an "l" and a speech-bubble "o" (the same shapes as the
+     web app's, on its 48 x 48 grid), scaled into the middle of the 108dp
+     adaptive-icon canvas so launcher masks never clip it. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="1.15"
+        android:scaleY="1.15"
+        android:translateX="24.6"
+        android:translateY="26.7">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M8,10.75 A3.75,3.75 0 0 1 15.5,10.75 V35.25 A3.75,3.75 0 0 1 8,35.25 Z" />
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:fillType="evenOdd"
+            android:pathData="M18.75,26 A12.25,12.25 0 1 0 43.25,26 A12.25,12.25 0 1 0 18.75,26 Z M26.25,26 A4.75,4.75 0 1 0 35.75,26 A4.75,4.75 0 1 0 26.25,26 Z" />
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M22.2,31.5 L18.5,40.5 L28.1,36.2 Z" />
+    </group>
+</vector>

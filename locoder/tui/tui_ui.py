@@ -8,8 +8,9 @@ so every method here marshals back onto the app's event loop via
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Sequence
+from typing import TYPE_CHECKING, Any, Optional, Sequence
 
+from locoder import desktop_notify
 from locoder.tools.base import ToolResult
 
 if TYPE_CHECKING:
@@ -50,6 +51,16 @@ class TuiUI:
 
     def confirm(self, title: str, preview: str, *, lang: str = "diff", reasons: Sequence[str] = ()) -> bool:
         return self.app.call_from_thread(self.app.request_confirm, title, preview, lang, list(reasons))
+
+    def ask_user(self, question: str, options: Sequence[str] = ()) -> Optional[str]:
+        return self.app.call_from_thread(self.app.request_answer, question, list(options))
+
+    def notify_user(self, title: str, message: str) -> None:
+        self.app.call_from_thread(self.app.show_notification, title, message)
+        desktop_notify.notify(title, message)
+
+    def show_todos(self, items: Sequence[dict[str, str]]) -> None:
+        self.app.call_from_thread(self.app.sidebar.set_todos, list(items))
 
     def info(self, msg: str) -> None:
         self.app.call_from_thread(self.app.chat_log.add_info, msg)

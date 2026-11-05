@@ -47,7 +47,11 @@ class LocoderServer(ThreadingHTTPServer):
     allow_reuse_address = True
 
     def __init__(self, address: tuple[str, int], hub: Hub, pairing: Pairing,
-                 log: Callable[[str], None] = lambda msg: None) -> None:
+                 log: Callable[[str], None] = lambda msg: None,
+                 *, web_dir: Path = WEB_DIR, app_name: str = "locoder") -> None:
+        # web_dir / app_name: the same server also runs lochat (locoder/lochat).
+        self.web_dir = web_dir
+        self.app_name = app_name
         self.hub = hub
         self.pairing = pairing
         self.log = log
@@ -145,7 +149,7 @@ class Handler(BaseHTTPRequestHandler):
         # Cloudflare could change it on the way.
         if "Cf-Ray" in self.headers or "Cf-Connecting-Ip" in self.headers:
             if url.path.startswith("/api/"):
-                return self._error(403, "over the internet, locoder only takes encrypted requests from its app")
+                return self._error(403, f"over the internet, {self.server.app_name} only takes encrypted requests from its app")
             return self._tunnel_page()
         if not url.path.startswith("/api/"):
             if method == "GET":
@@ -220,7 +224,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, channel.seal({"s": status, "b": data}, RESPONSE, nonce))
 
     def _tunnel_page(self) -> None:
-        body = TUNNEL_PAGE.encode("utf-8")
+        body = TUNNEL_PAGE.replace("locoder", self.server.app_name).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -229,8 +233,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def _static(self, path: str) -> None:
         rel = "index.html" if path in ("", "/") else path.lstrip("/")
-        target = (WEB_DIR / rel).resolve()
-        if WEB_DIR.resolve() not in target.parents or not target.is_file():
+        web_dir = self.server.web_dir.resolve()
+        target = (web_dir / rel).resolve()
+        if web_dir not in target.parents or not target.is_file():
             return self._error(404, "not found")
         body = target.read_bytes()
         self.send_response(200)
@@ -244,11 +249,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def hello(self) -> dict[str, Any]:
         """Unauthenticated: just enough for the phone to show which PC this is."""
-        return {"app": "locoder", "computer": self.server.hub.computer, "version": __version__}
+        return {"app": self.server.app_name, "computer": self.server.hub.computer, "version": __version__}
 
     def pair(self) -> dict[str, Any]:
         body = self._body()
         device = str(body.get("device") or "phone")
+        if self.server.pairing.closed:
+            self.server.log(f"refused a new phone ({device}): pairing is closed")
+            raise HubError(403, "this PC isn't accepting new phones - on the PC, run locoder serve --add-phone")
         key = self.server.pairing.pair(str(body.get("code", "")), device)
         if key is None:
             raise HubError(403, "wrong or expired code - check the one locoder serve shows now")
@@ -307,6 +315,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def confirm(self, request: str) -> None:
         self.server.hub.answer(request, bool(self._body().get("approve")))
+
+    def answer_question(self, question: str) -> None:
+        answer = self._body().get("answer")
+        self.server.hub.reply(question, None if answer is None else str(answer))
 
     def projects(self) -> dict[str, Any]:
         return {"projects": self.server.hub.projects()}
@@ -385,6 +397,7 @@ ROUTES = [
     Route("POST", "/api/chats/{chat}/messages", Handler.send_message),
     Route("POST", "/api/chats/{chat}/stop", Handler.stop),
     Route("POST", "/api/confirm/{request}", Handler.confirm),
+    Route("POST", "/api/questions/{question}", Handler.answer_question),
     Route("GET", "/api/projects", Handler.projects),
     Route("POST", "/api/projects/switch", Handler.switch_project),
     Route("GET", "/api/files/recent", Handler.files),

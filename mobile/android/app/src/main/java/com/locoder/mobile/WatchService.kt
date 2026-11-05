@@ -80,9 +80,14 @@ class WatchService : Service() {
                 if (state.isNull("running") && !reconnect) return false.also { running = false }
                 val pending = state.optJSONArray("pending")
                 for (i in 0 until (pending?.length() ?: 0)) notifications.approval(pending!!.getJSONObject(i))
+                val questions = state.optJSONArray("questions")
+                for (i in 0 until (questions?.length() ?: 0)) notifications.question(questions!!.getJSONObject(i))
             }
             "confirm" -> notifications.approval(event.getJSONObject("request"))
             "confirm_done" -> notifications.cancelApproval(event.optString("id"))
+            "question" -> notifications.question(event.getJSONObject("question"))
+            "question_done" -> notifications.cancelApproval(event.optString("id"))
+            "notify" -> notifications.update(event)
             "run_end" -> {
                 notifications.finished(event)
                 running = false

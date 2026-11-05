@@ -10,7 +10,7 @@ import sys
 import threading
 from enum import Enum
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 
 from locoder.context import ContextManager
 from locoder.providers.base import Message, ModelProvider
@@ -18,14 +18,17 @@ from locoder.sandbox import Sandbox
 from locoder.session import SessionStore
 from locoder.tools import registry as tools_registry
 from locoder.tools.base import ToolContext, ToolResult
+from locoder.tools.process_tools import stop_all
+from locoder.tools.web_tools import WEB_TOOLS
 from locoder.ui import UI
 
 SYSTEM_PROMPT = """\
 You are locoder, a careful local coding agent running in a user's terminal.
 
-You have tools to read, write, and edit files, list directories, search file \
-contents, and run shell commands. All file operations are sandboxed to the \
-current project directory.
+You have tools to read, write, edit, find, move and delete files, search file \
+contents, run shell commands and background processes, keep a checklist, ask \
+the user questions and send them notifications. All file operations are \
+sandboxed to the current project directory.
 
 Guidelines:
 - Read relevant files before editing them; don't guess at their contents.
@@ -35,6 +38,15 @@ write_file for new files or full rewrites.
 - Explain your plan briefly before making non-trivial changes.
 - After making changes, verify them (e.g. re-read the file or run relevant \
 commands/tests) when practical.
+- Use find_files to locate files by name, and move_path / delete_path rather \
+than shell commands to move or delete them.
+- For tasks with several steps, keep a checklist with update_todos and update \
+it as you go.
+- Start servers and anything else that keeps running with start_process, \
+never run_command (it waits for the command to finish).
+- If the request is unclear in a way that matters, ask with ask_user; for \
+small details, pick a sensible default.
+- On long tasks, use notify_user when a big step is done or you need the user.
 - Shell commands and file writes require user confirmation; if the user \
 declines, stop and ask how they'd like to proceed instead of retrying blindly.
 """
@@ -78,7 +90,8 @@ class AgentMode(str, Enum):
 
 
 MODE_ORDER = [AgentMode.BUILD, AgentMode.ASK, AgentMode.PLAN]
-READ_ONLY_TOOLS = {"read_file", "list_dir", "search_files", "send_file"}
+READ_ONLY_TOOLS = {"read_file", "list_dir", "search_files", "find_files", "send_file", "read_process",
+                   "update_todos", "ask_user", "notify_user", *WEB_TOOLS}
 
 MODE_COLORS = {
     AgentMode.BUILD: "#4a9eff",
@@ -115,6 +128,10 @@ class Agent:
         session: SessionStore,
         *,
         yolo: bool = False,
+        web: bool = False,
+        brave_api_key: Optional[str] = None,
+        tavily_api_key: Optional[str] = None,
+        processes: Any = None,
     ) -> None:
         self.provider = provider
         self.ui = ui
@@ -129,9 +146,42 @@ class Agent:
             yolo=yolo,
             confirm=self._confirm,
             notify=ui.info,
+            ask=self._ask,
+            notify_user=self._notify_user,
+            show_todos=self._show_todos,
+            processes=processes,
+            web_enabled=web,
+            brave_api_key=brave_api_key,
+            tavily_api_key=tavily_api_key,
         )
         self.tool_ctx.can_send_files = getattr(ui, "can_send_files", False) is True
         self._cancel_requested = threading.Event()
+
+    # The UI can be swapped (and older UIs lack these), so look them up per call.
+    def _ask(self, question: str, options: list[str]) -> Optional[str]:
+        ask = getattr(self.ui, "ask_user", None)
+        return ask(question, options) if callable(ask) else None
+
+    def _notify_user(self, title: str, message: str) -> None:
+        notify = getattr(self.ui, "notify_user", None)
+        if callable(notify):
+            notify(title, message)
+
+    def _show_todos(self, items: list[dict[str, str]]) -> None:
+        show = getattr(self.ui, "show_todos", None)
+        if callable(show):
+            show(items)
+
+    @property
+    def web(self) -> bool:
+        return self.tool_ctx.web_enabled
+
+    def set_web(self, value: bool) -> None:
+        self.tool_ctx.web_enabled = value
+
+    def close(self) -> None:
+        """Stop any background processes this agent started (unless they belong to a longer-lived owner)."""
+        stop_all(self.tool_ctx.processes)
 
     def _confirm(self, title: str, preview: str, reasons: Sequence[str] = ()) -> bool:
         if reasons:
@@ -155,6 +205,9 @@ class Agent:
     def clear(self) -> None:
         self.messages = [Message(role="system", content=SYSTEM_PROMPT)]
         self.session.start_new()
+        if self.tool_ctx.todos:
+            self.tool_ctx.todos = []
+            self._show_todos([])
 
     def token_usage(self) -> tuple[int, int]:
         return self.ctx_manager.total_tokens(self.messages), self.ctx_manager.num_ctx
@@ -165,12 +218,22 @@ class Agent:
 
     def _tool_schemas(self) -> list[dict]:
         schemas = tools_registry.all_schemas()
+        if not self.tool_ctx.web_enabled:
+            schemas = [s for s in schemas if s["function"]["name"] not in WEB_TOOLS]
         if not self.tool_ctx.can_send_files:
             # Nobody to send to: don't offer it, a small model would only get confused.
             schemas = [s for s in schemas if s["function"]["name"] != "send_file"]
         if self.mode == AgentMode.BUILD:
             return schemas
         return [s for s in schemas if s["function"]["name"] in READ_ONLY_TOOLS]
+
+    def _refuse_tool(self, name: str) -> Optional[str]:
+        """Why this tool can't run now (None: it can). Checked on every call,
+        whatever the model was offered - a model can name any tool."""
+        if self.mode != AgentMode.BUILD and name not in READ_ONLY_TOOLS:
+            return (f"'{name}' is not available in {self.mode.value} mode "
+                    "(read-only) - switch to Build mode (Tab) to make changes")
+        return None
 
     def _effective_messages(self) -> list[Message]:
         """The conversation as sent to the model: every system-role message
@@ -238,14 +301,9 @@ class Agent:
             stuck = False
             for tool_call in final_message.tool_calls:
                 self.ui.tool_call(tool_call.name, tool_call.arguments)
-                if self.mode != AgentMode.BUILD and tool_call.name not in READ_ONLY_TOOLS:
-                    result = ToolResult(
-                        output=(
-                            f"'{tool_call.name}' is not available in {self.mode.value} mode "
-                            "(read-only) - switch to Build mode (Tab) to make changes"
-                        ),
-                        is_error=True,
-                    )
+                refused = self._refuse_tool(tool_call.name)
+                if refused:
+                    result = ToolResult(output=refused, is_error=True)
                 else:
                     result = tools_registry.dispatch(tool_call.name, tool_call.arguments, self.tool_ctx)
                 if result.is_error:

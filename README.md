@@ -70,6 +70,21 @@ for HTML files, **open**, which tries the page right in the app (in a sandbox
 with no network, and without access to the app itself). Files up to 8 MB;
 secrets (`.env`, keys) and anything in `.git`/`.locoder` are never sent.
 
+## lochat: just chat, from your phone
+
+```
+lochat serve --tunnel
+```
+
+is `locoder serve` for plain chat, no coding: the model has no file or
+command tools (only web search, when you switch on the globe), and it keeps
+to itself - its own chats in `~/.lochat`, its own paired phones, port 8766 -
+so it can run next to `locoder serve`. Pair the **lochat** app
+(`mobile/lochat.apk`, or `gradlew assembleLochatDebug` in `mobile/android`)
+by scanning the QR code it prints. `--tunnel` makes it reachable away from
+home too, end-to-end encrypted through Cloudflare. Like locoder, pairing
+closes once a phone is paired (`--add-phone` lets one more in).
+
 ## Faster answers
 
 Models like qwen3 "think" before answering, which can take minutes on a slow
@@ -78,6 +93,28 @@ settings turns that off: much faster, a bit less careful on hard problems.
 Set `think: false` in `.locoder/config.yaml` to keep it off. If answers are
 slow anyway, check `num_ctx`: too big a context window can push part of the
 model onto the CPU (`ollama ps` shows the split).
+
+## What the model can do
+
+- **files:** read (one or several at once), write, edit (one change, several
+  changes at once, or replace every match), find by name (`*.py`,
+  `src/**/*.ts`), move or rename, delete, list folders, search inside files
+- **commands:** run a command and wait for it; or start something that keeps
+  running (a dev server) in the background, read its output, and stop it.
+  Background processes stop when locoder exits.
+- **a checklist:** on tasks with several steps the model keeps a plan you see
+  update live (the sidebar in the terminal, a card on the phone)
+- **questions:** when a choice really matters it asks you, with answers to tap
+  or type; skip it and the model picks a sensible default
+- **notifications:** on long tasks it can send a notification (Windows /
+  macOS / Linux desktop, and the phone app), at most one a minute
+- **the web (off by default):** search the web and read pages. Turn it on with
+  `/web`, the globe button on the phone, or `web: true` in
+  `.locoder/config.yaml`. Search needs a Brave Search API key
+  (`brave_api_key` in `~/.locoder/config.yaml`, or `BRAVE_API_KEY`):
+  DuckDuckGo, the fallback, usually blocks automated searches. Reading a page
+  needs no key. Pages are marked as information, not instructions, and
+  addresses on your PC or local network are refused.
 
 ## Safety
 
@@ -88,8 +125,9 @@ small models don't reliably recognise a dangerous action. Risky means
 (see `locoder/safety.py`):
 
 - files: changing a file over 1,000 lines, writing a new one that big,
-  removing or rewriting most of a file, `.env`/key files, `.git/`,
-  `.locoder/`, anything outside the project folder
+  removing or rewriting most of a file, deleting a big file or a folder with
+  more than three files, `.env`/key files, `.git/`, `.locoder/`, anything
+  outside the project folder
 - commands: deleting folders recursively, by wildcard, or more than three
   files at once; throwing away git work or history, `git push`; touching
   paths outside the project (absolute paths, `..`, your home folder);
@@ -107,6 +145,8 @@ possible one.
 - `/clear` - clear the conversation and start a new session
 - `/model <name>` - switch the active model
 - `/yolo` - toggle confirmation prompts on/off
+- `/think` - turn the model's thinking on or off
+- `/web` - let the model search the web and read pages, or stop it
 - `/tokens` - show approximate context/token usage
 - `/exit`, `/quit` - leave locoder
 
@@ -115,7 +155,9 @@ possible one.
 - `locoder/cli.py` - entry point and REPL
 - `locoder/agent.py` - the core tool-calling loop
 - `locoder/providers/` - model backends (Ollama, Groq, OpenAI-compatible)
-- `locoder/tools/` - file, search, and shell command tools
+- `locoder/tools/` - the model's tools: files, search, shell, background
+  processes, checklist / questions / notifications, web
+- `locoder/desktop_notify.py` - desktop notifications without extra packages
 - `locoder/config.py` - config file loading
 - `locoder/ui.py` - rich-based terminal rendering
 - `locoder/context.py` - token accounting and history compaction

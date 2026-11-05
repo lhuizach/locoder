@@ -99,6 +99,48 @@ class ConfirmModal(ModalScreen[bool]):
         self.dismiss(False)
 
 
+class AskModal(ModalScreen[Optional[str]]):
+    """The model's ask_user question: pick one of its options or type an answer.
+    Esc dismisses it, and the model is told nobody answered."""
+
+    BINDINGS = [Binding("escape", "skip", show=False)]
+
+    def __init__(self, question: str, options: list[str]) -> None:
+        super().__init__()
+        self._question = question
+        self._options = options
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="ask-box"):
+            yield Static(Text(self._question, style=f"bold {FG}"), id="ask-question")
+            if self._options:
+                yield OptionList(*[Option(f"{i}. {o}", id=str(i)) for i, o in enumerate(self._options, 1)],
+                                 id="ask-options", compact=True)
+            yield Input(placeholder="type your own answer..." if self._options else "type your answer...",
+                        id="ask-input", compact=True)
+            yield Static(_key_hint(("enter", "answer"), ("esc", "skip")), id="ask-hint")
+
+    def on_mount(self) -> None:
+        box = self.query_one("#ask-box")
+        box.border_title = _title("question", _accent(self))
+        box.styles.border = ("round", _accent(self))
+        if self._options:
+            self.query_one("#ask-options", OptionList).focus()
+        else:
+            self.query_one("#ask-input", Input).focus()
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        event.stop()
+        self.dismiss(self._options[int(event.option.id) - 1])
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        self.dismiss(event.value.strip() or None)
+
+    def action_skip(self) -> None:
+        self.dismiss(None)
+
+
 class SelectModal(ModalScreen[Optional[str]]):
     """Generic searchable pick-one-from-a-list modal (models, conversations)."""
 

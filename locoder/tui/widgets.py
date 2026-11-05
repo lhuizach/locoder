@@ -120,7 +120,7 @@ class StatusBar(Static):
 
 class Sidebar(Static):
     """Right-hand panel (a rounded outline titled "session" in app.tcss):
-    mode, model and context usage.
+    mode, model, web access, the model's plan and context usage.
     """
 
     def __init__(self, **kwargs: Any) -> None:
@@ -132,10 +132,35 @@ class Sidebar(Static):
         self._yolo = False
         self._mode_name = "Build"
         self._accent = ACCENT
+        self._web = False
+        self._todos: list[dict[str, str]] = []
         self._refresh_display()
 
     def on_mount(self) -> None:
         self.border_title = Text(" session ", style=MUTED)
+
+    def set_web(self, on: bool) -> None:
+        self._web = on
+        self._refresh_display()
+
+    def set_todos(self, items: list[dict[str, str]]) -> None:
+        """The model's update_todos checklist; an empty list hides it."""
+        self._todos = list(items)
+        self._refresh_display()
+
+    def _todo_blocks(self) -> list[Text]:
+        if not self._todos:
+            return []
+        done = sum(t["status"] == "done" for t in self._todos)
+        blocks = [Text.assemble(("plan", MUTED), (f"  {done}/{len(self._todos)} done", SECONDARY))]
+        for item in self._todos:
+            if item["status"] == "done":
+                blocks.append(Text.assemble(("• ", MUTED), (item["text"], f"{MUTED} strike")))
+            elif item["status"] == "in_progress":
+                blocks.append(Text.assemble(("› ", f"bold {self._accent}"), (item["text"], f"bold {FG}")))
+            else:
+                blocks.append(Text.assemble(("· ", MUTED), (item["text"], SECONDARY)))
+        return blocks + [Text("")]
 
     def set_model_info(self, *, provider: str, model: str, yolo: bool, mode_name: str, accent: str = ACCENT) -> None:
         self._provider = provider
@@ -164,7 +189,10 @@ class Sidebar(Static):
             Text(self._model, style=FG),
             Text.assemble((self._provider, SECONDARY)),
             writes,
+            Text.assemble(("web on", f"bold {self._accent}"), ("  /web to turn off", MUTED)) if self._web
+            else Text("web off  /web to turn on", style=MUTED),
             Text(""),
+            *self._todo_blocks(),
             Text("context", style=MUTED),
             Text.assemble((filled, usage_color(frac, self._accent)), (empty, FAINT)),
             Text.assemble((f"{self._used:,}", FG), (f" / {self._limit:,}", MUTED), (f"{SEP}{frac * 100:.0f}%", SECONDARY)),
@@ -177,6 +205,7 @@ class Sidebar(Static):
         for block in blocks:
             block.no_wrap = True
             block.overflow = "crop"
+        self.lines = blocks
         self.update(Group(*blocks))
 
 
@@ -351,7 +380,8 @@ class ChatLog(VerticalScroll):
         self._tools = []
         self._infos = set()
         self._last_text = None
-        self.mount(Static(Text("locoder", style=f"bold {self._accent}"), classes="turn-header"))
+        # No name label above the model's reply: just a blank line after your message.
+        self.mount(Static("", classes="turn-header"))
         self._thought = ThoughtLine(classes="turn-thought")
         self._thought.display = False
         self.mount(self._thought)

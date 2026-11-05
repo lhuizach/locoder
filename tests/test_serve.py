@@ -59,6 +59,29 @@ def test_code_expires_and_wrong_guesses_burn_it(tmp_path: Path):
     assert pairing.pair(code, "too late") is None  # burnt (a new code is 1-in-a-million the same)
 
 
+def test_pairing_closes_after_the_first_phone(tmp_path: Path):
+    shown: list[str] = []
+    pairing = Pairing(tmp_path / "d.json", on_new_code=shown.append, close_after_pair=True)
+    first = pairing.pair(pairing.current_code(), "mine")
+    assert first and pairing.closed
+    # A stranger who saw a code (even the newest) gets nothing
+    assert pairing.pair(pairing.code, "stranger") is None
+    assert pairing.pair_secret_for("anything") is None
+    assert pairing.check(first) is not None  # my phone keeps working
+    assert len(pairing.devices) == 1
+
+    pairing.closed = False  # what --add-phone does
+    assert pairing.pair(pairing.current_code(), "tablet") and pairing.closed
+
+
+def test_server_refuses_new_phones_when_closed(served):
+    client, hub, pairing, _ = served
+    pairing.closed = True
+    status, body = client.call("POST", "/api/pair", {"code": pairing.current_code(), "device": "x"})
+    assert status == 403 and "--add-phone" in body["error"]
+    assert pairing.devices == []
+
+
 def test_unpair(tmp_path: Path):
     pairing = Pairing(tmp_path / "d.json")
     a = pairing.pair(pairing.current_code(), "a")
@@ -493,3 +516,43 @@ def test_model_memory_and_unload(served, monkeypatch):
 
     hub.config.provider = "openai"
     assert client.call("GET", "/api/memory")[0] == 400
+
+
+def test_the_phone_answers_questions_and_sees_plans_and_notifications(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(hub_module, "record_project", lambda root: None)
+    monkeypatch.setattr(hub_module, "recent_projects", lambda current, limit=6: [])
+    monkeypatch.setenv("LOCODER_NO_DESKTOP_NOTIFY", "1")
+    project = tmp_path / "project"
+    project.mkdir()
+    todos = ToolCall(id="t1", name="update_todos", arguments={"todos": [{"text": "Pick a colour", "status": "in_progress"}]})
+    ask = ToolCall(id="a1", name="ask_user", arguments={"question": "Which colour?", "options": ["blue", "red"]})
+    notify = ToolCall(id="n1", name="notify_user", arguments={"title": "Done", "message": "Theme is set."})
+    replies = [Message(role="assistant", content="", tool_calls=[todos, ask]),
+               Message(role="assistant", content="", tool_calls=[notify]),
+               Message(role="assistant", content="Set it.")]
+    hub = Hub(project, provider_factory=lambda **kw: ScriptedProvider(list(replies)))
+    pairing = Pairing(tmp_path / "devices.json")
+    server = LocoderServer(("127.0.0.1", 0), hub, pairing)
+    threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
+    try:
+        client = Client(f"http://127.0.0.1:{server.server_address[1]}")
+        client.key = client.call("POST", "/api/pair", {"code": pairing.current_code()})[1]["key"]
+        assert client.call("PATCH", "/api/state", {"web": True})[1]["web"] is True
+
+        client.call("POST", "/api/chats", {"text": "pick a theme colour"})
+        plan = wait_for(hub, "todos")
+        assert plan["items"] == [{"text": "Pick a colour", "status": "in_progress"}]
+        question = wait_for(hub, "question")["question"]
+        assert (question["question"], question["options"]) == ("Which colour?", ["blue", "red"])
+        assert client.call("GET", "/api/state")[1]["questions"][0]["id"] == question["id"]
+
+        assert client.call("POST", f"/api/questions/{question['id']}", {"answer": "red"})[0] == 200
+        assert client.call("POST", f"/api/questions/{question['id']}", {"answer": "red"})[0] == 404
+        note = wait_for(hub, "notify")
+        assert (note["title"], note["message"]) == ("Done", "Theme is set.")
+        assert wait_for(hub, "run_end")["status"] == "done"
+        tool_results = [m.content for m in hub.store.load(hub.store.latest_session()) if m.role == "tool"]
+        assert "The user answered: red" in tool_results
+    finally:
+        server.shutdown()
+        server.server_close()

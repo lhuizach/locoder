@@ -68,8 +68,9 @@ ChatLog {
 
 /* One assistant turn: header, collapsed thought, tool lines, text, footer.
    Everything inside a turn is indented under the header. */
+/* No label above a reply any more: the gap after your message is enough. */
 .turn-header {
-    margin-top: 1;
+    height: 0;
 }
 
 .turn-thought {
@@ -199,6 +200,18 @@ StatusBar {
     color: $muted;
 }
 
+/* -- where the conversation sits (/layout) ---------------------------------
+   left: the default, the conversation beside the sidebar.
+   center: a narrower band in the middle, like a chat app.
+   right: left mirrored - the sidebar moves to the left edge.
+   (Before the home-screen rules, so those still win on the home screen.) */
+/* center needs no rules here: the column pads itself so the conversation
+   is a band in the middle (MainColumn in app.py). */
+Screen.layout-right #sidebar {
+    dock: left;
+    margin: 1 0 0 1;
+}
+
 /* -- home screen (empty conversation) --------------------------------------
    The logo + wordmark lockup and prompt box centred; no transcript, sidebar
    or status bar. */
@@ -215,7 +228,8 @@ Screen.home #main-column {
    so a single full-width child would pin them all to the left. */
 Screen.home #home-logo {
     display: block;
-    height: 1fr;
+    /* Most of the free space: the animated aura around the logo fills it. */
+    height: 3fr;
     width: 76;
     max-width: 100%;
     content-align: center bottom;
@@ -305,7 +319,27 @@ ModalScreen {
     align: center middle;
     background: #000000 55%;
 }
-#confirm-box, #select-box, #settings-box, #help-box {
+#ask-box {
+    width: 80%;
+}
+#ask-question {
+    margin-bottom: 1;
+}
+#ask-options {
+    height: auto;
+    max-height: 10;
+    margin-bottom: 1;
+}
+#ask-input {
+    padding: 0 1;
+    border: round $line;
+    background: $bg;
+    height: 3;
+}
+#ask-hint {
+    margin-top: 1;
+}
+#confirm-box, #select-box, #settings-box, #help-box, #ask-box {
     height: auto;
     max-height: 85%;
     padding: 1 2;

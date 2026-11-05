@@ -4,6 +4,8 @@ when `rg` isn't on PATH so locoder still works on a bare system.
 
 from __future__ import annotations
 
+import fnmatch
+import os
 import re
 import shutil
 import subprocess
@@ -113,6 +115,46 @@ def _walk(root: Path):
             yield path
 
 
+MAX_FOUND = 200
+MAX_FIND_SCAN = 100_000
+
+
+def _find_files(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
+    """Files (and folders) by name or path pattern. Pure Python, so it
+    behaves the same on Windows and Linux; matching ignores case."""
+    pattern = str(args["pattern"]).strip().replace("\\", "/").lower()
+    if not pattern:
+        raise ToolError("pattern is empty - e.g. '*.py', 'config.*' or 'src/**/*.test.js'")
+    if pattern.startswith("**/"):
+        pattern = pattern[3:]
+    pattern = pattern.replace("**/", "*")
+    root = ctx.sandbox.resolve(args.get("path") or ".", must_exist=True)
+    if not root.is_dir():
+        raise ToolError(f"'{args.get('path')}' is not a folder")
+    by_path = "/" in pattern
+
+    found: list[str] = []
+    scanned = 0
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames if d not in IGNORED_DIRS)
+        here = Path(dirpath)
+        for name, is_dir in [(d, True) for d in dirnames] + [(f, False) for f in sorted(filenames)]:
+            scanned += 1
+            subject = (here / name).relative_to(root).as_posix().lower() if by_path else name.lower()
+            if fnmatch.fnmatchcase(subject, pattern):
+                found.append(ctx.sandbox.display_path(here / name) + ("/" if is_dir else ""))
+        if len(found) > MAX_FOUND or scanned > MAX_FIND_SCAN:
+            break
+
+    if not found:
+        return ToolResult(output="no files found")
+    found.sort()
+    output = "\n".join(found[:MAX_FOUND])
+    if len(found) > MAX_FOUND or scanned > MAX_FIND_SCAN:
+        output += f"\n... stopped after {MAX_FOUND} results - narrow the pattern or path"
+    return ToolResult(output=output)
+
+
 register(
     Tool(
         name="search_files",
@@ -126,5 +168,24 @@ register(
             "required": ["pattern"],
         },
         handler=_search_files,
+    )
+)
+
+register(
+    Tool(
+        name="find_files",
+        description=(
+            "Find files and folders by name, e.g. '*.py', 'package.json', 'test_*'. Patterns with a / match the "
+            "path instead, e.g. 'src/**/*.ts'. Case doesn't matter. Use search_files to search inside files."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "pattern": {"type": "string", "description": "Name or path pattern with * and ? wildcards"},
+                "path": {"type": "string", "description": "Folder to search in, defaults to the project root"},
+            },
+            "required": ["pattern"],
+        },
+        handler=_find_files,
     )
 )

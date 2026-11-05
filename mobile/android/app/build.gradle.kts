@@ -13,13 +13,32 @@ android {
         // 34, not 35: Android 15 forces edge-to-edge for apps targeting 35,
         // which the WebView layout doesn't handle yet.
         targetSdk = 34
-        versionCode = 10
-        versionName = "0.6.3"
+        versionCode = 11
+        versionName = "0.7.0"
     }
 
-    // The web app is the single source of truth: package the one
-    // `locoder serve` serves (index.html + fonts/) instead of keeping a copy.
-    sourceSets["main"].assets.srcDirs("../../../locoder/serve/web")
+    // Two apps from one project: locoder, and lochat (chat only, no coding).
+    // Same wrapper code; each has its own id (so both can be installed), name,
+    // icon (src/<flavor>/res) and page. `gradlew assembleDebug` builds both.
+    flavorDimensions += "app"
+    productFlavors {
+        create("locoder") {
+            dimension = "app"
+            applicationId = "com.locoder.mobile"
+        }
+        create("lochat") {
+            dimension = "app"
+            applicationId = "com.lochat.mobile"
+            // Each build sent to the phone is mobile/lochat_v<versionCode>.apk.
+            versionCode = 7
+            versionName = "7"
+        }
+    }
+
+    // The web app is the single source of truth: package the one the server
+    // serves (index.html + fonts/) instead of keeping a copy.
+    sourceSets["locoder"].assets.srcDirs("../../../locoder/serve/web")
+    sourceSets["lochat"].assets.srcDirs("../../../locoder/lochat/web")
 
     buildTypes {
         release {

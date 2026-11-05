@@ -1,8 +1,33 @@
-import subprocess
+import argparse
+import os
+import re
+import secrets
+import shutil
 import socket
+import subprocess
+import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 PS_EXE = "powershell"
+
+HERE = Path(__file__).resolve().parent
+# A secret kept next to this file. Every trigger needs it, so only someone
+# with the link (not just anyone on the Wi-Fi or the tunnel) can fire a prank.
+SECRET_FILE = HERE / ".troll_secret"
+
+
+def load_secret():
+    try:
+        existing = SECRET_FILE.read_text(encoding="utf-8").strip()
+        if existing:
+            return existing
+    except OSError:
+        pass
+    token = secrets.token_urlsafe(18)
+    SECRET_FILE.write_text(token, encoding="utf-8")
+    return token
 
 MAXIMIZE = ""
 
@@ -357,6 +382,8 @@ button {{ display:block; width:100%; max-width:320px; margin:12px auto; padding:
   background:#222; color:#0f0; border:2px solid #0f0; border-radius:8px; }}
 button:active {{ background:#0f0; color:#000; }}
 h1 {{ color:#0f0; }}
+#status {{ min-height:1.2em; color:#0f0; }}
+#status.err {{ color:#f55; }}
 </style>
 </head>
 <body>
@@ -364,41 +391,115 @@ h1 {{ color:#0f0; }}
 {buttons_html}
 <p id="status"></p>
 <script>
+// The secret rides in the link's #fragment, which browsers never send over
+// the network, so the tunnel and its provider never see it.
+const KEY = new URLSearchParams(location.hash.slice(1)).get('k') || '';
+const status = document.getElementById('status');
+if (!KEY) {{ status.className = 'err'; status.innerText = 'no key in the link - open the full link the PC printed'; }}
 function fire(effect) {{
-  document.getElementById('status').innerText = 'Firing ' + effect + '...';
-  fetch('/trigger?effect=' + effect).then(() => {{
-    document.getElementById('status').innerText = effect + ' launched!';
-  }});
+  status.className = '';
+  status.innerText = 'Firing ' + effect + '...';
+  fetch('/trigger?effect=' + encodeURIComponent(effect) + '&k=' + encodeURIComponent(KEY)).then(r => {{
+    if (r.ok) status.innerText = effect + ' launched!';
+    else {{ status.className = 'err'; status.innerText = r.status === 403 ? 'wrong key' : 'unknown effect'; }}
+  }}).catch(() => {{ status.className = 'err'; status.innerText = "can't reach the PC"; }});
 }}
 </script>
 </body>
 </html>"""
 
+
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        if self.path == "/" or self.path == "/index.html":
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html")
-            self.end_headers()
-            self.wfile.write(PAGE.encode())
-        elif self.path.startswith("/trigger"):
-            effect = self.path.split("effect=")[-1]
-            if effect in EFFECTS:
-                subprocess.Popen([PS_EXE, "-NoExit", "-Command", EFFECTS[effect]],
-                                  creationflags=subprocess.CREATE_NEW_CONSOLE)
-                self.send_response(200)
-            else:
-                self.send_response(404)
-            self.end_headers()
+        url = urlparse(self.path)
+        query = parse_qs(url.query)
+        if url.path in ("/", "/index.html"):
+            # The page itself is harmless (no secret in it); it reads the key
+            # from its own link and sends it back only when you press a button.
+            self._send(200, PAGE.encode(), "text/html")
+        elif url.path == "/trigger":
+            if not secrets.compare_digest(query.get("k", [""])[0], self.server.secret):
+                return self._send(403, b"forbidden")
+            effect = query.get("effect", [""])[0]
+            if effect not in EFFECTS:
+                return self._send(404, b"unknown effect")
+            subprocess.Popen([PS_EXE, "-NoExit", "-Command", EFFECTS[effect]],
+                             creationflags=subprocess.CREATE_NEW_CONSOLE)
+            self._send(200, b"ok")
         else:
-            self.send_response(404)
-            self.end_headers()
+            self._send(404, b"not found")
+
+    def _send(self, status, body, ctype="text/plain"):
+        self.send_response(status)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def log_message(self, format, *args):
         pass
 
+
+def find_cloudflared():
+    """cloudflared next to this file, in locoder's bin, or on PATH."""
+    for candidate in (HERE / "cloudflared.exe", Path.home() / ".locoder" / "bin" / "cloudflared.exe"):
+        if candidate.is_file():
+            return str(candidate)
+    return shutil.which("cloudflared")
+
+
+def start_tunnel(port):
+    """A Cloudflare quick tunnel to this server; returns its https address."""
+    binary = find_cloudflared()
+    if not binary:
+        print("no tunnel: cloudflared.exe not found - home Wi-Fi only")
+        return None
+    proc = subprocess.Popen([binary, "tunnel", "--no-autoupdate", "--url", f"http://127.0.0.1:{port}"],
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    url = []
+
+    def read():
+        for line in proc.stdout:
+            match = re.search(r"https://[a-z0-9-]+\.trycloudflare\.com", line)
+            if match and not url:
+                url.append(match.group(0))
+
+    threading.Thread(target=read, daemon=True).start()
+    for _ in range(300):
+        if url:
+            return url[0]
+        threading.Event().wait(0.1)
+    print("no tunnel: cloudflared didn't come up - home Wi-Fi only")
+    return None
+
+
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="A prank remote for your own PC, from your phone.")
+    parser.add_argument("--port", type=int, default=5000, help="port to listen on (default 5000)")
+    parser.add_argument("--tunnel", action="store_true", help="also reachable from anywhere through Cloudflare")
+    parser.add_argument("--new-key", action="store_true", help="make a fresh secret (old links stop working)")
+    args = parser.parse_args()
+
+    if args.new_key:
+        try:
+            os.remove(SECRET_FILE)
+        except OSError:
+            pass
+    secret = load_secret()
+
+    server = HTTPServer(("0.0.0.0", args.port), Handler)
+    server.secret = secret
     ip = get_local_ip()
-    port = 5000
-    print(f"Dashboard running! On your phone (same wifi), open: http://{ip}:{port}")
-    HTTPServer(("0.0.0.0", port), Handler).serve_forever()
+
+    print("Troll Dashboard is running. Only someone with the link below can fire a prank.\n")
+    print(f"On your phone (same Wi-Fi), open:\n  http://{ip}:{args.port}/#k={secret}\n")
+    if args.tunnel:
+        public = start_tunnel(args.port)
+        if public:
+            print(f"From anywhere, open:\n  {public}/#k={secret}\n")
+    print("Keep this link private. Ctrl+C stops the server.\n")
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nstopped")

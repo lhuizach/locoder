@@ -32,8 +32,9 @@ from locoder.recent import recent_files, recent_projects, record_project, relati
 from locoder.safety import sendable_problem
 from locoder.sandbox import Sandbox, SandboxViolation
 from locoder.serve.transcript import to_entries
-from locoder.serve.web_ui import ConfirmRequest, WebUI, preview_text
+from locoder.serve.web_ui import ConfirmRequest, QuestionRequest, WebUI, preview_text
 from locoder.session import TITLE_PREVIEW_LEN, SessionStore
+from locoder.tools.process_tools import ProcessManager
 
 KEEP_EVENTS = 5_000
 TITLE_LEN = 80
@@ -60,6 +61,8 @@ class Run:
 
 
 class Hub:
+    name = "locoder"  # in messages to the phone (lochat's hub is "lochat")
+
     def __init__(self, project_root: Path, overrides: Optional[dict[str, Any]] = None,
                  *, provider_factory: Callable[..., Any] = create_provider) -> None:
         self.overrides = overrides or {}
@@ -74,8 +77,13 @@ class Hub:
         # The encrypted tunnel's public address, when there is one (tunnel.py).
         self.remote: Optional[str] = None
         self.pending: dict[str, ConfirmRequest] = {}
+        self.questions: dict[str, QuestionRequest] = {}
+        # Background processes (dev servers) outlive one task: each message
+        # gets a new Agent, but they all share this.
+        self.processes = ProcessManager()
         self._open_project(project_root)
         self.yolo = self.config.yolo
+        self.web = self.config.web
 
     # -- project ---------------------------------------------------------------
 
@@ -100,6 +108,7 @@ class Hub:
             if self.run:
                 raise HubError(409, "wait for the running task to finish (or stop it) first")
             yolo = self.yolo
+            self.processes.stop_all()  # they belong to the project being left
             self._open_project(Path(target))
             self.yolo = yolo
         self.publish("project", project=self.project_info())
@@ -234,15 +243,12 @@ class Hub:
 
         with self._lock:
             if self.run:
-                raise HubError(409, "locoder is already working on something - wait or stop it first")
+                raise HubError(409, f"{self.name} is already working on something - wait or stop it first")
             store = SessionStore(self.root)
             messages = store.resume(self._path(chat)) if chat else None
             chat_id = store.session_id
             ui = WebUI(self, chat_id)
-            ctx_manager = ContextManager(num_ctx=self.config.num_ctx,
-                                         threshold=self.config.context_compaction_threshold)
-            agent = Agent(self.provider, ui, self.sandbox, ctx_manager, store, yolo=self.yolo)
-            agent.set_mode(self.mode)
+            agent = self._new_agent(ui, store)
             if messages:
                 agent.messages = messages
             store.save(agent.messages)
@@ -252,6 +258,15 @@ class Hub:
         self.publish("chats")
         threading.Thread(target=self._work, args=(run,), name=f"locoder-run-{chat_id}", daemon=True).start()
         return {"id": chat_id}
+
+    def _new_agent(self, ui: WebUI, store: SessionStore) -> Agent:
+        ctx_manager = ContextManager(num_ctx=self.config.num_ctx,
+                                     threshold=self.config.context_compaction_threshold)
+        agent = Agent(self.provider, ui, self.sandbox, ctx_manager, store, yolo=self.yolo, web=self.web,
+                      brave_api_key=self.config.brave_api_key,
+                      tavily_api_key=self.config.tavily_api_key, processes=self.processes)
+        agent.set_mode(self.mode)
+        return agent
 
     def _work(self, run: Run) -> None:
         try:
@@ -270,6 +285,8 @@ class Hub:
                 self.run = None
                 for request in [p for p in self.pending.values() if p.chat == run.chat]:
                     self._answer(request, False)
+                for question in [q for q in self.questions.values() if q.chat == run.chat]:
+                    self._reply(question, None)
             self.publish("usage", chat=run.chat, used=used, limit=limit)
             self.publish("run_end", chat=run.chat, status=status, title=title, preview=preview_text(answer),
                          seconds=round(time.time() - run.started, 1), model=run.agent.provider.model)
@@ -299,6 +316,30 @@ class Hub:
         request.answered.set()
         self.publish("confirm_done", chat=request.chat, id=request.id, approved=approve)
 
+    def ask_question(self, question: QuestionRequest) -> Optional[str]:
+        """Called on the agent's thread: show the model's question, wait for an answer (None: skipped)."""
+        with self._lock:
+            if self.run is None or self.run.stopped:
+                return None
+            question.chat_title = self._title(self.run.agent.session.path)
+            self.questions[question.id] = question
+        self.publish("question", chat=question.chat, question=question.public())
+        question.answered.wait()
+        return question.answer
+
+    def reply(self, question_id: str, answer: Optional[str]) -> None:
+        with self._lock:
+            question = self.questions.get(question_id)
+            if question is None:
+                raise HubError(404, "that question was already answered")
+            self._reply(question, (answer or "").strip() or None)
+
+    def _reply(self, question: QuestionRequest, answer: Optional[str]) -> None:
+        self.questions.pop(question.id, None)
+        question.answer = answer
+        question.answered.set()
+        self.publish("question_done", chat=question.chat, id=question.id, answer=answer)
+
     def stop(self, chat: str) -> None:
         with self._lock:
             run = self.run
@@ -308,6 +349,8 @@ class Hub:
             run.agent.request_cancel()
             for request in [p for p in self.pending.values() if p.chat == chat]:
                 self._answer(request, False)
+            for question in [q for q in self.questions.values() if q.chat == chat]:
+                self._reply(question, None)
 
     # -- session settings ------------------------------------------------------
 
@@ -326,8 +369,11 @@ class Hub:
                 "num_ctx": self.config.num_ctx,
                 "think": self.config.think,
                 "yolo": self.yolo,
+                "web": self.web,
                 "running": run.chat if run else None,
                 "pending": [p.public() for p in self.pending.values()],
+                "questions": [q.public() for q in self.questions.values()],
+                "todos": list(run.agent.tool_ctx.todos) if run else [],
                 "seq": self._seq,
                 "remote": self.remote,
             }
@@ -342,6 +388,8 @@ class Hub:
                     raise HubError(400, "mode must be build, ask or plan") from None
             if "yolo" in changes:
                 self.yolo = bool(changes["yolo"])
+            if "web" in changes:
+                self.web = bool(changes["web"])  # applies from the next message; not saved
             if "model" in changes:
                 model = str(changes["model"]).strip()
                 if not model:
@@ -362,7 +410,7 @@ class Hub:
                 self.provider = self.provider_factory(**self.config.provider_kwargs())
                 self.config.save(self.root)
         state = self.state()
-        self.publish("state", state={k: state[k] for k in ("mode", "model", "temperature", "yolo", "think")})
+        self.publish("state", state={k: state[k] for k in ("mode", "model", "temperature", "yolo", "think", "web")})
         return state
 
     # -- files for the phone -----------------------------------------------------

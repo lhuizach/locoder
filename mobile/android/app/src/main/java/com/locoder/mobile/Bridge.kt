@@ -126,7 +126,7 @@ class Bridge(private val activity: Activity, private val webView: WebView) {
         activity.runOnUiThread {
             IntentIntegrator(activity)
                 .setDesiredBarcodeFormats(IntentIntegrator.QR_CODE)
-                .setPrompt("point at the QR code locoder serve shows")
+                .setPrompt("point at the QR code ${activity.getString(R.string.app_name)} serve shows")
                 .setBeepEnabled(false)
                 .setOrientationLocked(false)
                 .initiateScan()

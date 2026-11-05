@@ -9,4 +9,9 @@ build/
 .pytest_cache/
 *.log
 troll_dashboard/cloudflared.exe
+troll_dashboard/.troll_secret
 *.apk
+
+# Other projects' models and code (3 GB), and this PC's Claude Code settings
+Models/
+.claude/

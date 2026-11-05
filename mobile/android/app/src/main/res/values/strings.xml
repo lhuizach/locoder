@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The app's name, also in notifications; lochat's is in src/lochat/res. -->
+    <string name="app_name">locoder</string>
+</resources>

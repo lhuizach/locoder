@@ -83,8 +83,8 @@ def sendable_problem(root: Path, path: Path) -> Optional[str]:
 # -- file changes ------------------------------------------------------------------
 
 
-def file_change_risks(root: Path, path: Path, old: Optional[str], new: str) -> list[str]:
-    """Why writing ``new`` over ``old`` (None: a new file) at ``path`` is risky."""
+def path_risks(root: Path, path: Path) -> list[str]:
+    """Why changing anything at ``path`` is risky, whatever the change."""
     reasons = []
     if not _inside(path, root):
         reasons.append("it's outside the project folder")
@@ -95,11 +95,17 @@ def file_change_risks(root: Path, path: Path, old: Optional[str], new: str) -> l
         parts = Path(path).resolve().relative_to(Path(root).resolve()).parts
     except ValueError:
         parts = Path(path).parts
-    for part in parts[:-1]:
+    for part in parts:
         if part in PROTECTED_DIRS:
             reasons.append(f"it changes {part}/ ({PROTECTED_DIRS[part]})")
             break
+    return reasons
 
+
+def file_change_risks(root: Path, path: Path, old: Optional[str], new: str) -> list[str]:
+    """Why writing ``new`` over ``old`` (None: a new file) at ``path`` is risky."""
+    reasons = path_risks(root, path)
+    name = path.name
     old_lines, new_lines = _lines(old), _lines(new)
     if old is not None and old_lines > LARGE_FILE_LINES:
         reasons.append(f"{name} is a big file ({old_lines:,} lines)")
@@ -252,6 +258,11 @@ def _target_reason(target: str, cwd: Path) -> list[str]:
     except (OSError, ValueError):
         pass
     return []
+
+
+def delete_risks(root: Path, path: Path) -> list[str]:
+    """Why deleting ``path`` (a file, or a folder and everything in it) is risky."""
+    return path_risks(root, path) + _target_reason(str(path), path.parent)
 
 
 _WRITES = re.compile(r"set-content|add-content|out-file|\btee\b|>\s*[^\s&|]|writealltext|\.write\(|writelines", _I)

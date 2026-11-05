@@ -9,6 +9,11 @@ encryption secret (see e2e.py), which only matters to this PC.
 
 Each code also comes with a random pairing secret, shown only in the QR code,
 which lets a phone pair through the encrypted tunnel.
+
+Pairing can be closed (``closed``): then no code works at all, so once your
+phone is paired nobody else can pair, even if they see a code. ``locoder
+serve`` closes it whenever a phone is already paired, and right after a phone
+pairs; ``locoder serve --add-phone`` opens it for one more.
 """
 
 from __future__ import annotations
@@ -53,6 +58,7 @@ class Pairing:
         *,
         clock: Callable[[], float] = time.time,
         on_new_code: Callable[[str], None] = lambda code: None,
+        close_after_pair: bool = False,
     ) -> None:
         self.store = store
         self.clock = clock
@@ -63,6 +69,8 @@ class Pairing:
         self.pair_secret = b""
         self._code_expires = 0.0
         self._attempts = 0
+        self.close_after_pair = close_after_pair
+        self.closed = False
         self.new_code()
 
     # -- the one-time code ---------------------------------------------------
@@ -85,6 +93,8 @@ class Pairing:
     def pair(self, code: str, device_name: str) -> Optional[str]:
         """Trade a correct code for a new key (None if the code is wrong)."""
         with self._lock:
+            if self.closed:
+                return None
             if self.clock() >= self._code_expires:
                 self.new_code()
                 return None
@@ -99,6 +109,8 @@ class Pairing:
             self.devices.append(Device(_hash(key), name, paired_at=now, last_seen=now,
                                        secret=device_secret(key).hex()))
             self._save()
+            if self.close_after_pair:
+                self.closed = True  # before new_code, so it isn't shown as a new code to use
             self.new_code()  # one use only
             return key
 
@@ -130,7 +142,7 @@ class Pairing:
     def pair_secret_for(self, pid: str) -> Optional[bytes]:
         """The current code's pairing secret, if ``pid`` names it and it hasn't expired."""
         with self._lock:
-            if self.clock() >= self._code_expires:
+            if self.closed or self.clock() >= self._code_expires:
                 return None
             return self.pair_secret if secrets.compare_digest(pair_id(self.pair_secret), str(pid)) else None
 

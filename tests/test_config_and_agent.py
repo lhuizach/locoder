@@ -86,3 +86,49 @@ def test_effective_messages_have_a_single_leading_system_message(tmp_path: Path)
     assert [m.role for m in effective] == ["system", "user"]
     assert "PLAN mode" in effective[0].content
     assert "facts" in effective[0].content
+
+
+def test_home_folder_project_config_is_the_global_one(tmp_path: Path):
+    """Run from the home folder, the project's config file *is* the global one:
+    no false "ignored yolo" warning, and saving settings keeps yolo/allowed_paths."""
+    from locoder.config import AppConfig
+
+    home = tmp_path
+    global_file = home / ".locoder" / "config.yaml"
+    global_file.parent.mkdir(parents=True)
+    global_file.write_text("yolo: true\nallowed_paths: ['D:/shared']\nmodel: m1\n", encoding="utf-8")
+
+    config = AppConfig.load(home, global_config_path=global_file)
+    assert config.warnings == []
+    assert config.yolo is True and config.allowed_paths == ["D:/shared"] and config.model == "m1"
+
+    config.model = "m2"
+    config.save(home, global_config_path=global_file)
+    saved = AppConfig.load(home, global_config_path=global_file)
+    assert saved.model == "m2" and saved.yolo is True and saved.allowed_paths == ["D:/shared"]
+
+
+def test_a_real_project_still_cannot_turn_on_yolo(tmp_path: Path):
+    from locoder.config import AppConfig
+
+    global_file = tmp_path / "home" / ".locoder" / "config.yaml"
+    project = tmp_path / "project"
+    (project / ".locoder").mkdir(parents=True)
+    (project / ".locoder" / "config.yaml").write_text("yolo: true\n", encoding="utf-8")
+    config = AppConfig.load(project, global_config_path=global_file)
+    assert config.yolo is False and "ignored yolo" in config.warnings[0]
+
+
+def test_save_global_setting_changes_only_its_line(tmp_path: Path):
+    from locoder.config import AppConfig, save_global_setting
+
+    path = tmp_path / ".locoder" / "config.yaml"
+    path.parent.mkdir()
+    path.write_text("# my settings\nmodel: m\nchat_layout: left\nsome_key: secret\n", encoding="utf-8")
+    save_global_setting("chat_layout", "center", global_config_path=path)
+    assert path.read_text(encoding="utf-8") == '# my settings\nmodel: m\nchat_layout: "center"\nsome_key: secret\n'
+    assert AppConfig.load(tmp_path / "project", global_config_path=path).chat_layout == "center"
+
+    path.write_text("chat_layout: sideways\n", encoding="utf-8")
+    config = AppConfig.load(tmp_path / "project", global_config_path=path)
+    assert config.chat_layout == "left" and "isn't one of" in config.warnings[0]

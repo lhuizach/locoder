@@ -11,6 +11,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Optional, Sequence
 
+from locoder import desktop_notify
 from locoder.display import TOOL_VERBS, tool_target
 from locoder.serve.transcript import tool_entry
 from locoder.tools.base import ToolResult
@@ -37,6 +38,23 @@ class ConfirmRequest:
     def public(self) -> dict[str, Any]:
         return {"id": self.id, "chat": self.chat, "chat_title": self.chat_title, "title": self.title,
                 "preview": self.preview, "danger": self.danger, "reasons": self.reasons}
+
+
+@dataclass
+class QuestionRequest:
+    """The model's ask_user question, waiting for the phone to answer it."""
+
+    id: str
+    chat: str
+    question: str
+    options: list[str] = field(default_factory=list)
+    chat_title: str = ""
+    answered: threading.Event = field(default_factory=threading.Event)
+    answer: Optional[str] = None
+
+    def public(self) -> dict[str, Any]:
+        return {"id": self.id, "chat": self.chat, "chat_title": self.chat_title, "question": self.question,
+                "options": self.options}
 
 
 class WebUI:
@@ -83,6 +101,17 @@ class WebUI:
             reasons=list(reasons),
         )
         return self.hub.ask(request)
+
+    def ask_user(self, question: str, options: Sequence[str] = ()) -> Optional[str]:
+        return self.hub.ask_question(QuestionRequest(id=f"q{next(_ids)}", chat=self.chat_id, question=question,
+                                                     options=list(options)))
+
+    def notify_user(self, title: str, message: str) -> None:
+        self._emit("notify", title=title, message=message)
+        desktop_notify.notify(title, message)
+
+    def show_todos(self, items: Sequence[dict[str, str]]) -> None:
+        self._emit("todos", items=list(items))
 
     def info(self, msg: str) -> None:
         self._emit("note", level="info", text=msg)

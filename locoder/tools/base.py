@@ -46,6 +46,21 @@ class ToolContext:
     written: set[Path] = field(default_factory=set)
     # True when a phone is attached (locoder serve): send_file only works then.
     can_send_files: bool = False
+    # ask(question, options): the user's answer, or None when nobody answers
+    # (no one at the keyboard, a batch run, the question dismissed).
+    ask: Callable[[str, list[str]], Optional[str]] = field(default=lambda question, options: None)
+    # notify_user(title, message): a desktop / phone notification.
+    notify_user: Callable[[str, str], None] = field(default=lambda title, message: None)
+    # show_todos(items): redraw the model's checklist wherever the user is looking.
+    show_todos: Callable[[list[dict[str, str]]], None] = field(default=lambda items: None)
+    todos: list[dict[str, str]] = field(default_factory=list)
+    last_notify: Optional[float] = None
+    # Background processes (start_process); a ProcessManager, made on first use.
+    # A long-lived owner (locoder serve) passes its own so servers outlive one run.
+    processes: Any = None
+    web_enabled: bool = False
+    brave_api_key: Optional[str] = None
+    tavily_api_key: Optional[str] = None
 
 
 @dataclass

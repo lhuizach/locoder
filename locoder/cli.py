@@ -90,7 +90,8 @@ def _run(args: argparse.Namespace, project_root: Path) -> int | Path:
     sandbox = Sandbox(project_root, allowed_paths=config.allowed_paths)
     ctx_manager = ContextManager(num_ctx=config.num_ctx, threshold=config.context_compaction_threshold)
     session = SessionStore(project_root)
-    agent = Agent(provider, ui, sandbox, ctx_manager, session, yolo=config.yolo)
+    agent = Agent(provider, ui, sandbox, ctx_manager, session, yolo=config.yolo, web=config.web,
+                  brave_api_key=config.brave_api_key, tavily_api_key=config.tavily_api_key)
 
     if args.plain:
         ui.banner(
@@ -103,7 +104,10 @@ def _run(args: argparse.Namespace, project_root: Path) -> int | Path:
         for warning in config.warnings:
             ui.warn(warning)
         _check_backend_reachable(provider, ui)
-        repl(agent, ui, session)
+        try:
+            repl(agent, ui, session)
+        finally:
+            agent.close()
         return 0
 
     from locoder.tui.app import LocoderApp, SwitchProject
@@ -114,6 +118,8 @@ def _run(args: argparse.Namespace, project_root: Path) -> int | Path:
         print(f"locoder: the full-screen UI failed to start ({exc})")
         print("Try running from Windows Terminal, cmd.exe, or PowerShell, or use 'locoder --plain'.")
         return 1
+    finally:
+        agent.close()  # background processes don't outlive locoder
     if isinstance(result, SwitchProject) and result.path.is_dir():
         return result.path
     return 0
@@ -196,6 +202,11 @@ def _handle_slash_command(raw: str, agent: Agent, ui: UI) -> bool:
         agent.set_provider(agent.provider.with_think(thinking))
         ui.system("thinking on - slower, more careful" if thinking
                   else "thinking off - much faster, a bit less careful (this session only)")
+        return False
+    if cmd == "web":
+        agent.set_web(not agent.web)
+        ui.system("web on - the model can search the web and read pages (this session only)" if agent.web
+                  else "web off - no web search or page fetching")
         return False
     if cmd == "tokens":
         used, limit = agent.token_usage()

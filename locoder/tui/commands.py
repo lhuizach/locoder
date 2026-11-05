@@ -33,6 +33,8 @@ SLASH_COMMANDS: list[SlashCommand] = [
     SlashCommand("conversations", ("sessions",), "browse and resume past conversations", opens_modal=True),
     SlashCommand("yolo", (), "skip approvals except for risky actions"),
     SlashCommand("think", (), "turn the model's thinking on or off (off is much faster)"),
+    SlashCommand("web", (), "let the model search the web and read pages, or stop it"),
+    SlashCommand("layout", (), "conversation on the left, in the middle or on the right (/layout center)"),
     SlashCommand("sidebar", (), "show or hide the sidebar (ctrl+b)"),
     SlashCommand("tokens", (), "show context/token usage"),
     SlashCommand("exit", ("quit",), "leave locoder"),

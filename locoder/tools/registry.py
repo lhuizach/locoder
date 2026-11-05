@@ -9,7 +9,15 @@ from locoder.tools.base import Tool, ToolContext, ToolError, ToolResult
 
 # Import for registration side effects (each module calls base.register(...)
 # at import time).
-from locoder.tools import file_tools, search_tools, send_tools, shell_tools  # noqa: F401
+from locoder.tools import (  # noqa: F401
+    file_tools,
+    process_tools,
+    search_tools,
+    send_tools,
+    shell_tools,
+    user_tools,
+    web_tools,
+)
 
 # Hard ceiling on what any single tool result can add to the conversation
 # (~5k tokens). Without it one read of a big file can fill a local model's

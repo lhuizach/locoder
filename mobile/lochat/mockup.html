@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d0d0d">
+<title>lochat</title>
+<!-- A dummy: fake data, no server. Shows how lochat looks before it talks to locoder serve. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0d0d0d;
+    --raise: #151515;
+    --fg: #f0f0f0;
+    --secondary: #a8a8a8;
+    --muted: #6a6a6a;
+    --faint: #3a3a3a;
+    --line: #262626;
+    --hover: #1b1b1b;
+    --ok: #5fb85f;
+    --accent: #a78bfa;
+    --accent-2: #7c3aed;
+    --accent-dim: #a78bfa22;
+    --on-accent: #140b2e;
+    --font: "Bricolage Grotesque", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    --r: 20px;
+    --spring: cubic-bezier(.34, 1.56, .64, 1);
+    --ease: cubic-bezier(.2, .8, .2, 1);
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font-family: var(--font); font-weight: 600; }
+  body { display: flex; justify-content: center; }
+  button, input, textarea { font: inherit; color: inherit; }
+  button { background: none; border: 0; cursor: pointer; padding: 0; transition: transform .18s var(--spring), background .2s, color .2s, border-color .2s, box-shadow .2s; }
+  button:active { transform: scale(.88); }
+  svg { display: block; }
+
+  .app { width: 100%; max-width: 480px; height: 100dvh; position: relative; overflow: hidden; }
+
+  /* -- screens slide and fade between each other ---------------------------- */
+  .view { position: absolute; inset: 0; display: flex; flex-direction: column;
+          transition: transform .45s var(--ease), opacity .35s var(--ease), filter .35s; }
+  .view.hidden { opacity: 0; pointer-events: none; transform: translateX(40px) scale(.98); filter: blur(4px); }
+  .view.hidden.back { transform: translateX(-40px) scale(.98); }
+
+  /* things that drop in when their screen appears, one after another */
+  .in { opacity: 0; transform: translateY(14px); }
+  .view:not(.hidden) .in { animation: rise .55s var(--ease) forwards; animation-delay: calc(var(--i, 0) * 55ms + 80ms); }
+  @keyframes rise { to { opacity: 1; transform: none; } }
+
+  /* -- top bar ----------------------------------------------------------------- */
+  .bar { display: flex; align-items: center; gap: 6px; padding: 14px 12px 10px 18px; min-height: 66px; }
+  .bar h1 { font-size: 32px; font-weight: 800; margin: 0; flex: 1; letter-spacing: -.03em; }
+  .bar h1 .bo { animation: wobble 4s var(--ease) infinite; transform-origin: 30% 80%; }
+  @keyframes wobble { 0%, 86%, 100% { transform: none; } 90% { transform: rotate(-14deg) scale(1.15); } 95% { transform: rotate(10deg); } }
+  .bar .title { flex: 1; min-width: 0; }
+  .bar .title b { display: block; font-size: 18px; font-weight: 800; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar .title span { font-size: 12px; color: var(--muted); font-weight: 500; display: flex; align-items: center; gap: 5px; }
+  .iconbtn { width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; color: var(--secondary); flex: none; }
+  .iconbtn:hover { background: var(--hover); color: var(--fg); }
+  .iconbtn svg { width: 22px; height: 22px; }
+  .spin-hover:hover svg { transform: rotate(90deg); }
+  .spin-hover svg { transition: transform .5s var(--spring); }
+
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); position: relative; flex: none; }
+  .dot::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--ok); animation: ping 2s ease-out infinite; }
+  @keyframes ping { 0% { transform: scale(1); opacity: .7; } 80%, 100% { transform: scale(2.8); opacity: 0; } }
+  .pc { width: 42px; height: 42px; display: grid; place-items: center; position: relative; color: var(--secondary); }
+  .pc svg { width: 22px; height: 22px; }
+  .pc .dot { position: absolute; right: 8px; top: 9px; box-shadow: 0 0 0 2px var(--bg); }
+
+  /* search: an icon that opens into a field */
+  .search { display: flex; align-items: center; height: 42px; width: 42px; border-radius: 99px; overflow: hidden;
+            transition: width .4s var(--spring), background .3s; flex: none; }
+  .search .iconbtn { pointer-events: auto; }
+  .search input { width: 0; border: 0; outline: 0; background: none; font-size: 16px; font-weight: 600; padding: 0; opacity: 0; transition: opacity .2s; }
+  .search.open { width: 210px; background: var(--raise); }
+  .search.open input { width: 150px; opacity: 1; transition-delay: .15s; }
+  .bar.searching h1 { opacity: 0; transform: translateX(-10px); }
+  .bar h1 { transition: opacity .25s, transform .25s; }
+
+  /* -- connect -------------------------------------------------------------------- */
+  .connect { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px 24px; text-align: center; gap: 16px; }
+  .mark { width: 92px; height: 92px; border-radius: 30px; display: grid; place-items: center; position: relative;
+          background: var(--accent-2);
+          animation: float 4s ease-in-out infinite; }
+  .mark::before { content: ""; position: absolute; inset: -14px; border-radius: 40px; border: 2px solid #a78bfa55; animation: halo 3s ease-out infinite; }
+  .mark svg { width: 62px; height: 62px; }
+  .mark .tail { transform-origin: 26px 33px; animation: talk 2.4s var(--spring) infinite; }
+  @keyframes talk { 0%, 70%, 100% { transform: none; } 78% { transform: rotate(-16deg) scale(1.15); } 88% { transform: rotate(6deg); } }
+  /* the bubble "o" in the wordmark */
+  .bo { width: .74em; height: .74em; margin: 0 .03em 0 -.05em; color: var(--accent); vertical-align: -.02em; display: inline-block; }
+  @keyframes float { 0%, 100% { transform: translateY(0) rotate(-3deg); } 50% { transform: translateY(-8px) rotate(3deg); } }
+  @keyframes halo { 0% { transform: scale(.85); opacity: 1; } 100% { transform: scale(1.25); opacity: 0; } }
+  .connect h2 { margin: 6px 0 0; font-size: 52px; font-weight: 800; letter-spacing: -.045em; line-height: 1; }
+  .connect p { margin: 0; color: var(--secondary); line-height: 1.45; max-width: 290px; font-weight: 500; }
+  .codebox { display: flex; gap: 8px; margin-top: 8px; }
+  .codebox span { width: 44px; height: 58px; border-radius: 14px; border: 2px solid var(--line); background: var(--raise);
+                  display: grid; place-items: center; font-size: 26px; font-weight: 800; transition: border-color .2s, transform .3s var(--spring); }
+  .codebox span.filled { border-color: var(--faint); animation: pop .35s var(--spring); }
+  .codebox span.cur { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-dim); }
+  .codebox span.cur::after { content: ""; width: 2px; height: 26px; background: var(--accent); animation: caret 1s steps(1) infinite; }
+  @keyframes caret { 50% { opacity: 0; } }
+  @keyframes pop { 0% { transform: scale(.6); } 100% { transform: scale(1); } }
+  .connect-row { display: flex; gap: 12px; margin-top: 10px; }
+  .bigbtn { width: 64px; height: 64px; border-radius: 22px; display: grid; place-items: center; }
+  .bigbtn svg { width: 28px; height: 28px; }
+  .bigbtn.go { background: var(--accent); color: var(--on-accent); }
+  .bigbtn.go:hover svg { transform: translateX(4px); }
+  .bigbtn.go svg { transition: transform .3s var(--spring); }
+  .bigbtn.qr { border: 2px solid var(--line); color: var(--secondary); }
+  .bigbtn.qr:hover { border-color: var(--accent); color: var(--accent); }
+  .fine { font-size: 12px; color: var(--muted); max-width: 300px; line-height: 1.5; font-weight: 500; }
+  .fine code { font-family: var(--mono); color: var(--secondary); }
+
+  /* -- chat list --------------------------------------------------------------------- */
+  .list { flex: 1; overflow-y: auto; padding: 0 8px 110px; }
+  .group { font-size: 13px; color: var(--muted); padding: 16px 12px 6px; font-weight: 700; letter-spacing: .02em; }
+  .item { display: flex; gap: 12px; align-items: center; width: 100%; text-align: left; padding: 11px 12px; border-radius: 18px; }
+  .item:hover { background: var(--hover); }
+  .item:hover .avatar { transform: rotate(-8deg) scale(1.08); }
+  .avatar { width: 46px; height: 46px; border-radius: 16px; flex: none; display: grid; place-items: center; background: var(--raise);
+            border: 1px solid var(--line); font-size: 21px; transition: transform .35s var(--spring); }
+  .item .txt { min-width: 0; flex: 1; }
+  .item b { display: block; font-weight: 700; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .item small { display: block; color: var(--muted); font-size: 13.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+  .item time { font-size: 12px; color: var(--muted); align-self: flex-start; margin-top: 3px; font-weight: 600; }
+  .item.gone { animation: hide .25s forwards; }
+  @keyframes hide { to { opacity: 0; transform: translateX(20px); } }
+
+  .fab { position: absolute; right: 20px; bottom: 26px; width: 64px; height: 64px; border-radius: 22px; display: grid; place-items: center;
+         background: var(--accent); color: var(--on-accent); }
+  .view:not(.hidden) .fab { animation: fabin .6s var(--spring) .35s backwards; }
+  @keyframes fabin { from { transform: scale(0) rotate(-90deg); } }
+  .fab svg { width: 28px; height: 28px; transition: transform .4s var(--spring); }
+  .fab:hover svg { transform: rotate(90deg); }
+
+  /* -- one chat ---------------------------------------------------------------------------- */
+  .chat .bar { border-bottom: 1px solid var(--line); padding-left: 6px; }
+  .messages { flex: 1; overflow-y: auto; padding: 18px 16px 8px; display: flex; flex-direction: column; gap: 18px; scroll-behavior: smooth; }
+  .msg { animation: msgin .45s var(--spring) backwards; }
+  .msg.you { align-self: flex-end; max-width: 82%; background: #231d36; border: 1px solid #3a3157;
+             padding: 11px 15px; border-radius: var(--r) var(--r) 6px var(--r); line-height: 1.4; font-weight: 600; transform-origin: bottom right; }
+  .msg.ai { line-height: 1.55; color: var(--fg); font-weight: 500; transform-origin: top left; }
+  .msg.ai b { font-weight: 800; }
+  @keyframes msgin { from { opacity: 0; transform: translateY(12px) scale(.94); } }
+  .msg.ai p { margin: 0 0 10px; }
+  .msg.ai p:last-child { margin: 0; }
+  .msg.ai ul { margin: 0 0 10px; padding-left: 20px; }
+  .msg.ai li { margin: 5px 0; }
+  .msg.ai li::marker { color: var(--accent); }
+  .word { opacity: 0; animation: word .35s var(--ease) forwards; }
+  @keyframes word { from { opacity: 0; filter: blur(3px); } to { opacity: 1; filter: none; } }
+  .thought { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 10px; color: var(--accent); background: var(--accent-dim); margin-bottom: 8px; }
+  .thought svg { width: 16px; height: 16px; }
+  .actions { display: flex; gap: 2px; margin-top: 6px; margin-left: -10px; opacity: 0; animation: rise .4s var(--ease) .3s forwards; }
+  .actions .iconbtn { width: 36px; height: 36px; }
+  .actions svg { width: 18px; height: 18px; }
+  .actions .done { color: var(--ok); }
+  .typing { display: inline-flex; gap: 6px; padding: 10px 14px; border-radius: 16px; background: var(--raise); }
+  .typing i { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: jump 1s var(--ease) infinite; }
+  .typing i:nth-child(2) { animation-delay: .15s; } .typing i:nth-child(3) { animation-delay: .3s; }
+  @keyframes jump { 0%, 60%, 100% { transform: translateY(0); opacity: .4; } 30% { transform: translateY(-6px); opacity: 1; } }
+
+  .empty { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 22px; padding: 24px; }
+  .empty h3 { margin: 0; font-size: 34px; font-weight: 800; letter-spacing: -.035em; text-align: center; line-height: 1.05; }
+  .empty h3 span { color: var(--accent); }
+  .empty .mark { width: 72px; height: 72px; border-radius: 24px; animation: rise .6s var(--spring) backwards, float 4s ease-in-out .6s infinite; }
+  .empty .mark::before { border-radius: 32px; inset: -10px; }
+  .empty .mark svg { width: 48px; height: 48px; }
+  .empty h3 { animation: rise .6s var(--ease) .12s backwards; }
+
+  .composer { margin: 8px 12px calc(12px + env(safe-area-inset-bottom)); border: 2px solid var(--line); border-radius: 26px; background: var(--raise);
+              padding: 6px 6px 6px 8px; display: flex; align-items: flex-end; gap: 4px; transition: border-color .25s, box-shadow .25s; }
+  .composer:focus-within { border-color: #4c3d7a; box-shadow: 0 0 0 4px var(--accent-dim); }
+  .composer textarea { flex: 1; resize: none; border: 0; outline: 0; background: none; font-size: 16px; font-weight: 600; padding: 10px 4px; max-height: 140px; line-height: 1.35; }
+  .composer textarea::placeholder { color: var(--muted); }
+  .toggle { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; color: var(--muted); position: relative; flex: none; }
+  .toggle svg { width: 21px; height: 21px; transition: transform .45s var(--spring); }
+  .toggle:hover { color: var(--secondary); background: var(--hover); }
+  .toggle.on { color: var(--accent); background: var(--accent-dim); }
+  .toggle.on svg { transform: scale(1.08); }
+  #think.on svg { animation: glow 2.4s ease-in-out infinite; }
+  #think.on .rays { opacity: 1; }
+  #think .rays { opacity: 0; transition: opacity .3s; }
+  @keyframes glow { 0%, 100% { transform: scale(1.08); } 50% { transform: scale(.94); } }
+  #web.on svg { animation: turn 6s linear infinite; }
+  @keyframes turn { to { transform: rotate(360deg); } }
+  .toggle.flash::after { content: ""; position: absolute; inset: 0; border-radius: 50%; border: 2px solid var(--accent); animation: ring .5s ease-out forwards; }
+  @keyframes ring { from { transform: scale(.8); opacity: 1; } to { transform: scale(1.6); opacity: 0; } }
+  .send { width: 42px; height: 42px; border-radius: 50%; background: var(--accent); color: var(--on-accent); display: grid; place-items: center; flex: none; }
+  .send:disabled { background: var(--faint); color: var(--muted); cursor: default; transform: scale(.85); }
+  .send svg { width: 20px; height: 20px; transition: transform .3s var(--spring); }
+  .send.fly svg { animation: fly .5s var(--ease); }
+  @keyframes fly { 40% { transform: translateY(-26px); opacity: 0; } 41% { transform: translateY(20px); opacity: 0; } 100% { transform: none; opacity: 1; } }
+
+  .demo-nav { position: fixed; top: 8px; right: 8px; display: flex; gap: 4px; z-index: 5; font-size: 11px; font-weight: 600; }
+  .demo-nav button { padding: 4px 8px; border-radius: 6px; background: #ffffff10; color: var(--muted); }
+  .demo-nav button.on { color: var(--fg); background: #ffffff22; }
+  @media (max-width: 520px) { .demo-nav { top: auto; bottom: 96px; left: 50%; right: auto; transform: translateX(-50%); } }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+  }
+</style>
+</head>
+<body>
+<!-- only for the mockup: jump between screens -->
+<div class="demo-nav" aria-label="mockup screens">
+  <button data-go="connect">connect</button>
+  <button data-go="list" class="on">chats</button>
+  <button data-go="chat">chat</button>
+</div>
+
+<div class="app">
+  <!-- 1. connect: pair with the PC running locoder serve -->
+  <section class="view hidden" id="connect">
+    <div class="connect">
+      <div class="mark in" style="--i:0"><svg viewBox="0 0 48 48"><rect x="8" y="7" width="7.5" height="32" rx="3.75" fill="#fff"/><circle cx="31" cy="26" r="8.5" fill="none" stroke="#fff" stroke-width="7.5"/><path class="tail" d="M22.2 31.5 18.5 40.5l9.6-4.3z" fill="#fff"/></svg></div>
+      <h2 class="in" style="--i:1" aria-label="lochat">l<svg class="bo" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12.5" cy="11.5" r="8" fill="none" stroke="currentColor" stroke-width="5"/><path d="M5.2 15.5 2.5 22.5l7.6-3.4z" fill="currentColor"/></svg>chat</h2>
+      <p class="in" style="--i:2">Chat with the AI on your own PC. Private and encrypted.</p>
+      <div class="codebox in" style="--i:3" id="codebox"><span></span><span></span><span></span><span></span><span></span><span></span></div>
+      <div class="connect-row in" style="--i:4">
+        <button class="bigbtn qr" title="Scan QR code" aria-label="Scan QR code"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><rect x="8" y="8" width="3" height="3" rx=".5"/><rect x="13" y="8" width="3" height="3" rx=".5"/><rect x="8" y="13" width="3" height="3" rx=".5"/><path d="M13 13h3v3"/></svg></button>
+        <button class="bigbtn go" data-go="list" title="Connect" aria-label="Connect"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+      </div>
+      <p class="fine in" style="--i:5">On your PC: <code>locoder serve --tunnel</code></p>
+    </div>
+  </section>
+
+  <!-- 2. chat list -->
+  <section class="view" id="list">
+    <div class="bar" id="listbar">
+      <h1 aria-label="lochat">l<svg class="bo" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12.5" cy="11.5" r="8" fill="none" stroke="currentColor" stroke-width="5"/><path d="M5.2 15.5 2.5 22.5l7.6-3.4z" fill="currentColor"/></svg>chat</h1>
+      <div class="search" id="search">
+        <button class="iconbtn" id="searchbtn" title="Search" aria-label="Search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></button>
+        <input id="searchinput" aria-label="Search chats">
+      </div>
+      <span class="pc" title="Connected to lhuir-pc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg><span class="dot"></span></span>
+      <button class="iconbtn spin-hover" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></button>
+    </div>
+    <div class="list" id="chatlist">
+      <div class="group in" style="--i:0">Today</div>
+      <button class="item in" style="--i:1" data-go="chat"><span class="avatar">🍝</span><span class="txt"><b>Quick dinner ideas</b><small>Here are three you can make in 20 minutes…</small></span><time>18:42</time></button>
+      <button class="item in" style="--i:2" data-go="chat"><span class="avatar">✉️</span><span class="txt"><b>Email to my landlord</b><small>Hi Sam, I wanted to let you know the heating…</small></span><time>11:05</time></button>
+      <div class="group in" style="--i:3">This week</div>
+      <button class="item in" style="--i:4" data-go="chat"><span class="avatar">🪐</span><span class="txt"><b>Why is Saturn's ring flat?</b><small>Collisions between the ice particles…</small></span><time>Thu</time></button>
+      <button class="item in" style="--i:5" data-go="chat"><span class="avatar">🏋️</span><span class="txt"><b>3-day workout plan</b><small>Day 1: push. Day 2: pull. Day 3: legs…</small></span><time>Tue</time></button>
+      <button class="item in" style="--i:6" data-go="chat"><span class="avatar">🌮</span><span class="txt"><b>Spanish practice</b><small>¡Muy bien! Now try it in the past tense.</small></span><time>Mon</time></button>
+      <div class="group in" style="--i:7">Older</div>
+      <button class="item in" style="--i:8" data-go="chat"><span class="avatar">🎁</span><span class="txt"><b>Birthday gift for mum</b><small>Since she likes gardening, how about…</small></span><time>Oct 2</time></button>
+    </div>
+    <button class="fab" data-go="new" title="New chat" aria-label="New chat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+  </section>
+
+  <!-- 3. one chat -->
+  <section class="view chat hidden" id="chat">
+    <div class="bar">
+      <button class="iconbtn" data-go="list" title="Back" aria-label="Back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg></button>
+      <div class="title"><b id="chat-title">Quick dinner ideas</b><span><span class="dot"></span>qwen3.5:4b</span></div>
+      <button class="iconbtn" title="More" aria-label="More"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>
+    </div>
+    <div class="messages" id="messages"></div>
+    <div class="composer">
+      <button class="toggle" id="think" title="Think" aria-label="Think" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 21.5h4M12 6a5.5 5.5 0 0 0-3.6 9.6c.6.6 1 1.3 1 2.4h5.2c0-1.1.4-1.8 1-2.4A5.5 5.5 0 0 0 12 6z"/><g class="rays"><path d="M12 1.5v1.5M4.5 4.5l1 1M19.5 4.5l-1 1M2 11h1.5M20.5 11H22"/></g></svg></button>
+      <button class="toggle" id="web" title="Web" aria-label="Web" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 3 2.6 15 0 18M12 3c-2.6 3-2.6 15 0 18"/></svg></button>
+      <textarea id="input" rows="1" aria-label="Message"></textarea>
+      <button class="send" id="send" disabled title="Send" aria-label="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+    </div>
+  </section>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const messages = $("#messages"), input = $("#input"), send = $("#send");
+
+const ICON_COPY = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h9"/></svg>`;
+const ICON_CHECK = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>`;
+const ACTIONS = `<div class="actions">
+  <button class="iconbtn copy" title="Copy" aria-label="Copy">${ICON_COPY}</button>
+  <button class="iconbtn spin-hover" title="Retry" aria-label="Retry"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5"/></svg></button>
+  <button class="iconbtn like" title="Good answer" aria-label="Good answer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></svg></button>
+</div>`;
+const THOUGHT = `<div class="thought" title="Thought for 3s"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 21.5h4M12 4a6 6 0 0 0-4 10.5c.6.6 1 1.4 1 2.5h6c0-1.1.4-1.9 1-2.5A6 6 0 0 0 12 4z"/></svg></div>`;
+
+const SAMPLE = [
+  ["you", "what can I make for dinner tonight? I have eggs, rice, spinach and some cheese"],
+  ["ai", `${THOUGHT}
+    <p>Nice, that's a good combo. Three ideas, all about 20 minutes:</p>
+    <ul><li><b>Cheesy spinach fried rice</b>: fry the rice, wilt in the spinach, push aside and scramble two eggs, then melt the cheese on top.</li>
+    <li><b>Spinach and cheese omelette</b> with rice on the side.</li>
+    <li><b>Baked rice cups</b>: mix rice, egg, chopped spinach and cheese, spoon into a muffin tin, 15 min at 200°C.</li></ul>
+    <p>Want the full recipe for one of them?</p>${ACTIONS}`],
+  ["you", "the fried rice one pls"],
+];
+const REPLY = "This is a dummy reply. The real app will stream the answer from the model on your PC, word by word, just like this.";
+
+function addMsg(who, html, delay = 0) {
+  const el = document.createElement("div");
+  el.className = "msg " + who;
+  el.style.animationDelay = delay + "ms";
+  if (who === "you") el.textContent = html; else el.innerHTML = html;
+  messages.appendChild(el);
+  messages.scrollTop = messages.scrollHeight;
+  return el;
+}
+function stream(el, text) {
+  // reveal word by word, the way a streamed answer arrives
+  el.innerHTML = "<p></p>";
+  const p = el.firstChild, words = text.split(" ");
+  words.forEach((w, i) => setTimeout(() => {
+    const s = document.createElement("span");
+    s.className = "word"; s.textContent = (i ? " " : "") + w;
+    p.appendChild(s);
+    messages.scrollTop = messages.scrollHeight;
+    if (i === words.length - 1) { el.insertAdjacentHTML("beforeend", ACTIONS); messages.scrollTop = messages.scrollHeight; }
+  }, i * 70));
+}
+function fakeReply() {
+  const el = addMsg("ai", `<div class="typing"><i></i><i></i><i></i></div>`);
+  setTimeout(() => stream(el, REPLY), 1200);
+}
+function emptyChat() {
+  messages.innerHTML = `<div class="empty"><div class="mark"><svg viewBox="0 0 48 48"><rect x="8" y="7" width="7.5" height="32" rx="3.75" fill="#fff"/><circle cx="31" cy="26" r="8.5" fill="none" stroke="#fff" stroke-width="7.5"/><path class="tail" d="M22.2 31.5 18.5 40.5l9.6-4.3z" fill="#fff"/></svg></div><h3>What's on<br>your <span>mind?</span></h3></div>`;
+}
+function ask() {
+  const text = input.value.trim();
+  if (!text) return;
+  if (messages.querySelector(".empty")) messages.innerHTML = "";
+  send.classList.remove("fly"); void send.offsetWidth; send.classList.add("fly");
+  addMsg("you", text);
+  input.value = ""; input.style.height = ""; send.disabled = true;
+  fakeReply();
+}
+
+// -- moving between screens --------------------------------------------------------
+const ORDER = ["connect", "list", "chat"];
+let current = "list";
+function restart(view) {
+  // replay the drop-in animations each time a screen comes back
+  view.querySelectorAll(".in, .fab").forEach((el) => { el.style.animation = "none"; void el.offsetWidth; el.style.animation = ""; });
+}
+function go(where) {
+  const target = where === "new" ? "chat" : where;
+  const forward = ORDER.indexOf(target) >= ORDER.indexOf(current);
+  document.querySelectorAll(".view").forEach((v) => {
+    const show = v.id === target;
+    v.classList.toggle("back", !show && forward);
+    v.classList.toggle("hidden", !show);
+    if (show) restart(v);
+  });
+  current = target;
+  document.querySelectorAll(".demo-nav button").forEach((b) => b.classList.toggle("on", b.dataset.go === target));
+  if (where === "new") { $("#chat-title").textContent = "New chat"; emptyChat(); }
+  else if (where === "chat") {
+    $("#chat-title").textContent = "Quick dinner ideas";
+    messages.innerHTML = "";
+    SAMPLE.forEach(([who, html], i) => addMsg(who, html, 150 + i * 160));
+    setTimeout(fakeReply, 700);
+  } else if (where === "connect") typeCode();
+}
+document.addEventListener("click", (e) => {
+  const t = e.target.closest("[data-go]");
+  if (t) return go(t.dataset.go);
+  const copy = e.target.closest(".copy");
+  if (copy) { copy.innerHTML = ICON_CHECK; copy.classList.add("done"); setTimeout(() => { copy.innerHTML = ICON_COPY; copy.classList.remove("done"); }, 1200); }
+  const like = e.target.closest(".like");
+  if (like) like.classList.toggle("on") , like.style.color = like.classList.contains("on") ? "#f472b6" : "";
+});
+
+// the connect screen types a code in, to show the boxes animating
+let typing;
+function typeCode() {
+  clearInterval(typing);
+  const boxes = [...document.querySelectorAll("#codebox span")];
+  boxes.forEach((b) => { b.textContent = ""; b.className = ""; });
+  boxes[0].className = "cur";
+  let i = 0;
+  typing = setInterval(() => {
+    if (i >= 6) return clearInterval(typing);
+    boxes[i].className = "filled"; boxes[i].textContent = "203475"[i];
+    if (boxes[++i]) boxes[i].className = "cur";
+  }, 380);
+}
+
+// search opens out of its icon
+$("#searchbtn").onclick = () => {
+  const open = $("#search").classList.toggle("open");
+  $("#listbar").classList.toggle("searching", open);
+  if (open) $("#searchinput").focus(); else { $("#searchinput").value = ""; filter(""); }
+};
+function filter(q) {
+  q = q.toLowerCase();
+  document.querySelectorAll("#chatlist .item").forEach((it) => { it.style.display = it.textContent.toLowerCase().includes(q) ? "" : "none"; });
+}
+$("#searchinput").oninput = (e) => filter(e.target.value);
+
+input.addEventListener("input", () => {
+  send.disabled = !input.value.trim();
+  input.style.height = "auto";
+  input.style.height = Math.min(input.scrollHeight, 140) + "px";
+});
+input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ask(); } });
+send.onclick = ask;
+for (const id of ["think", "web"]) $("#" + id).onclick = (e) => {
+  const b = e.currentTarget, on = b.classList.toggle("on");
+  b.setAttribute("aria-pressed", on);
+  b.classList.remove("flash"); void b.offsetWidth; if (on) b.classList.add("flash");
+};
+</script>
+</body>
+</html>

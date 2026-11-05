@@ -16,11 +16,12 @@ from typing import Any, Optional, Sequence
 from rich import box
 from rich.console import Console
 from rich.panel import Panel
-from rich.prompt import Confirm
+from rich.prompt import Confirm, Prompt
 from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 
+from locoder import desktop_notify
 from locoder.display import (
     ERROR,
     FAINT,
@@ -92,6 +93,7 @@ class UI:
             ("/model <name>", "switch the active model"),
             ("/yolo", "skip approvals for everyday actions (risky ones still ask)"),
             ("/think", "turn the model's thinking on or off (off is much faster)"),
+            ("/web", "let the model search the web and read pages, or stop it"),
             ("/tokens", "show context/token usage"),
             ("/exit, /quit", "leave locoder"),
         ]:
@@ -104,7 +106,6 @@ class UI:
     def stream_token(self, token: str) -> None:
         if not self._streaming:
             self.console.print()
-            self.console.print(Text("locoder", style=f"bold {self.accent}"))
             self._streaming = True
         self.console.print(token, end="", highlight=False, soft_wrap=True, markup=False)
 
@@ -169,6 +170,44 @@ class UI:
         if lang == "diff":
             return Syntax(preview, "diff", theme="ansi_dark", word_wrap=True, background_color="default")
         return Text(preview, style=FG)
+
+    # -- talking to the user (ask_user, notify_user, update_todos) ------------
+
+    def ask_user(self, question: str, options: Sequence[str] = ()) -> Optional[str]:
+        self.end_stream()
+        body = Table.grid()
+        body.add_row(Text(question, style=f"bold {FG}"))
+        for i, option in enumerate(options, start=1):
+            body.add_row(Text.assemble((f"  {i}. ", self.accent), (option, SECONDARY)))
+        hint = "type a number or your own answer" if options else "type your answer"
+        body.add_row(Text(f"({hint}; Enter on its own skips)", style=MUTED))
+        self.console.print(Panel(body, title=Text(" question ", style=f"bold {self.accent}"), title_align="left",
+                                 border_style=self.accent, box=box.ROUNDED if self.fancy else box.ASCII, padding=(0, 1)))
+        try:
+            answer = Prompt.ask(Text("answer", style=FG), default="", show_default=False, console=self.console)
+        except (EOFError, KeyboardInterrupt):
+            return None
+        answer = answer.strip()
+        if answer.isdigit() and 1 <= int(answer) <= len(options):
+            return options[int(answer) - 1]
+        return answer or None
+
+    def notify_user(self, title: str, message: str) -> None:
+        self.end_stream()
+        self.console.print(Text.assemble(("  notification ", f"bold {self.accent}"), (title, FG), (SEP, FAINT),
+                                         (message, SECONDARY)))
+        desktop_notify.notify(title, message)
+
+    def show_todos(self, items: Sequence[dict]) -> None:
+        if not items:
+            return
+        self.end_stream()
+        marks = {"done": ICON_OK if self.fancy else "x", "in_progress": ">", "pending": "·" if self.fancy else "-"}
+        for item in items:
+            status = item.get("status", "pending")
+            color = MUTED if status == "done" else (self.accent if status == "in_progress" else SECONDARY)
+            self.console.print(Text.assemble(("  ", ""), (marks.get(status, "-"), color), (" " + item.get("text", ""),
+                                             f"{color} strike" if status == "done" else color)))
 
     # -- misc status ----------------------------------------------------------
 

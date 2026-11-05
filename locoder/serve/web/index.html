@@ -227,6 +227,27 @@
   .approve .result { display: none; padding: 8px 12px 10px; font: 600 12px var(--sans); color: var(--muted); }
   .approve.done .result { display: block; }
 
+  /* the model's question (ask_user): reuses the approval card's frame */
+  .approve .question { padding: 0 12px 4px; font: 600 15px/1.4 var(--sans); color: var(--fg); overflow-wrap: anywhere; }
+  .approve .opts { display: flex; flex-direction: column; gap: 6px; padding: 8px 12px 0; }
+  .approve .opts .btn { height: auto; min-height: 40px; padding: 8px 12px; text-align: left; justify-content: flex-start; }
+  .approve .typed { display: flex; gap: 8px; padding: 8px 12px 12px; }
+  .approve .typed input { flex: 1; min-width: 0; height: 40px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line);
+    background: transparent; color: var(--fg); font: 500 14px var(--sans); }
+  .approve.done .opts, .approve.done .typed { display: none; }
+
+  /* the model's checklist (update_todos) and notifications (notify_user) */
+  .plan { margin: 8px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r); font: 500 13px/1.5 var(--sans); }
+  .plan .title { font: 800 12px var(--sans); color: var(--muted); margin-bottom: 4px; }
+  .plan .step { display: flex; gap: 8px; color: var(--muted); }
+  .plan .step.in_progress { color: var(--fg); font-weight: 700; }
+  .plan .step.in_progress .mark { color: var(--accent); }
+  .plan .step.done { text-decoration: line-through; opacity: .7; }
+  .plan .mark { flex: none; width: 14px; text-align: center; }
+  .notice-card { margin: 8px 0; padding: 10px 12px; border-left: 3px solid var(--accent); border-radius: 8px;
+    background: color-mix(in srgb, var(--accent) 10%, transparent); font: 500 13px/1.4 var(--sans); }
+  .notice-card b { display: block; font-weight: 800; }
+
   /* empty-chat welcome */
   .welcome { padding: 36px 8px 8px; text-align: center; }
   .welcome .where { font: 600 12px var(--sans); color: var(--muted); margin-top: 18px; }
@@ -418,6 +439,17 @@
               <line class="slash" x1="4" y1="3.5" x2="20" y2="20.5"/>
             </svg>
           </button>
+          <button class="think-btn" id="webChip" aria-label="web search off" aria-pressed="false" title="web search: lets the model search the web and read pages">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <g class="brain">
+                <circle cx="12" cy="12" r="9"/>
+                <path d="M3 12h18"/>
+                <path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18"/>
+              </g>
+              <line class="slash-gap" x1="4" y1="3.5" x2="20" y2="20.5"/>
+              <line class="slash" x1="4" y1="3.5" x2="20" y2="20.5"/>
+            </svg>
+          </button>
           <div class="grow mono muted" style="font-size:11px; font-weight:600" id="boxMeta"></div>
           <button class="send" id="sendBtn" disabled aria-label="send">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
@@ -447,6 +479,7 @@
         <button class="item" id="settingsModel"><div class="grow">model</div><span class="val" id="settingsModelVal">…</span></button>
         <div class="item"><div class="grow">temperature<div class="sub">lower = more predictable</div></div><input type="range" min="0" max="1" step="0.05" value="0.2" id="tempRange"><span class="val" id="tempVal" style="width:34px;text-align:right">0.2</span></div>
         <div class="item"><div class="grow">thinking<div class="sub">off = much faster answers, a bit less careful on hard problems</div></div><button class="switch on" id="thinkSwitch" aria-label="thinking"></button></div>
+        <div class="item"><div class="grow">web search<div class="sub">lets the model search the web and read pages; its searches go to the internet</div></div><button class="switch" id="webSwitch" aria-label="web search"></button></div>
         <div class="item"><div class="grow">context window</div><span class="val" id="ctxVal">…</span></div>
         <div class="item"><div class="grow">in memory<div class="sub" id="memSub">…</div></div><button class="btn" id="unloadBtn" style="height:36px;padding:0 14px" hidden>unload now</button></div>
       </div>
@@ -1122,6 +1155,12 @@ function applyState(st) {
   chip.classList.toggle("on", thinking);
   chip.setAttribute("aria-pressed", String(thinking));
   chip.setAttribute("aria-label", thinking ? "thinking on" : "thinking off");
+  const web = s.web === true, webChip = $("#webChip");
+  $("#webSwitch").classList.toggle("on", web);
+  webChip.classList.toggle("unsupported", s.web === undefined);
+  webChip.classList.toggle("on", web);
+  webChip.setAttribute("aria-pressed", String(web));
+  webChip.setAttribute("aria-label", web ? "web search on" : "web search off");
   if (document.activeElement !== $("#tempRange") && s.temperature != null) {
     $("#tempRange").value = s.temperature;
     $("#tempVal").textContent = fmtTemp(s.temperature);
@@ -1565,6 +1604,27 @@ function applyToView(ev, replay = false) {
       setLive(ev.approved ? "Working" : "Thinking");
       return;
     }
+    case "question":
+      addToTurn(questionCard(ev.question));
+      setLive("Waiting for your answer");
+      if (!replay) scrollDown(true);
+      return;
+    case "question_done": {
+      const card = view.cards[ev.id];
+      if (card) {
+        card.classList.add("done");
+        card.querySelector(".result").textContent = ev.answer ? `you answered: ${ev.answer}` : "skipped";
+      }
+      setLive("Thinking");
+      return;
+    }
+    case "todos":
+      showPlan(ev.items || []);
+      return;
+    case "notify":
+      addToTurn(h("div", { class: "notice-card" }, h("b", {}, ev.title), ev.message));
+      if (!replay) toast(`${ev.title}: ${ev.message}`);
+      return;
     case "note":
       addToTurn(h("div", { class: `note ${ev.level}` }, ev.text));
       return;
@@ -1582,6 +1642,7 @@ function applyToView(ev, replay = false) {
         view.turn.append(h("div", { class: "footer", style: label ? "color:var(--warn)" : null }, footer));
       }
       view.turn = null;
+      view.plan = null;
       view.text = view.lastText = view.pendingTool = null;
       view.tools = 0;
       view.phaseStart = 0;
@@ -1623,6 +1684,43 @@ function approvalCard(req) {
     }
   }
   return card;
+}
+
+function questionCard(q) {
+  if (view.cards[q.id]) return view.cards[q.id];
+  const input = h("input", { type: "text", placeholder: q.options?.length ? "or type your own answer" : "type your answer",
+    enterkeyhint: "send", onkeydown: e => { if (e.key === "Enter" && input.value.trim()) send(input.value.trim()); } });
+  const card = h("div", { class: "approve" },
+    h("div", { class: "head" }, "question"),
+    h("div", { class: "question" }, q.question),
+    q.options?.length ? h("div", { class: "opts" },
+      ...q.options.map(o => h("button", { class: "btn", onclick: () => send(o) }, o))) : null,
+    h("div", { class: "typed" }, input,
+      h("button", { class: "btn accent", onclick: () => input.value.trim() && send(input.value.trim()) }, "send"),
+      h("button", { class: "btn", onclick: () => send(null) }, "skip")),
+    h("div", { class: "result" }));
+  view.cards[q.id] = card;
+  async function send(answer) {
+    $$("button, input", card).forEach(b => b.disabled = true);
+    try {
+      await api.post(`/api/questions/${q.id}`, { answer });
+    } catch (e) {
+      $$("button, input", card).forEach(b => b.disabled = false);
+      if (e.status === 404) { card.classList.add("done"); return; }
+      fail(e);
+    }
+  }
+  return card;
+}
+const PLAN_MARKS = { done: "✓", in_progress: "›", pending: "·" };
+function showPlan(items) {
+  // One checklist per task, updated in place as the model ticks things off.
+  if (!items.length) { view.plan?.remove(); view.plan = null; return; }
+  const done = items.filter(i => i.status === "done").length;
+  const card = h("div", { class: "plan" }, h("div", { class: "title" }, `plan · ${done} of ${items.length} done`),
+    ...items.map(i => h("div", { class: `step ${i.status}` }, h("span", { class: "mark" }, PLAN_MARKS[i.status] || "·"), i.text)));
+  if (view.plan?.isConnected) view.plan.replaceWith(card); else addToTurn(card);
+  view.plan = card;
 }
 
 /* ---------- mode, model, attachments ---------- */
@@ -1807,6 +1905,20 @@ function toggleThinking() {
 }
 $("#thinkSwitch").addEventListener("click", toggleThinking);
 $("#thinkChip").addEventListener("click", toggleThinking);
+
+// Both the switch in Settings and the globe button in the message box.
+function toggleWeb() {
+  if (S.server.web === undefined) return toast(NEEDS_RESTART);
+  const on = S.server.web !== true;
+  api.patch("/api/state", { web: on })
+    .then(st => {
+      applyState(st);
+      toast(on ? "web on - the model can search the web and read pages" : "web off - no web search or page fetching");
+    })
+    .catch(fail);
+}
+$("#webSwitch").addEventListener("click", toggleWeb);
+$("#webChip").addEventListener("click", toggleWeb);
 $("#confirmSwitch").addEventListener("click", () => {
   if (!S.server.yolo) {
     dialog({ title: "turn on yolo mode?", text: "locoder will make everyday edits and run everyday commands on your PC without asking, until locoder serve restarts. Risky ones (deleting a lot, big files, anything outside the project) still ask.", okLabel: "turn on yolo", danger: true,

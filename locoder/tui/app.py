@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 from rich.text import Text
 from textual.app import App, ComposeResult
@@ -15,7 +16,7 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import OptionList, Static
 
 from locoder.agent import MODE_COLORS, MODE_ORDER, Agent
-from locoder.config import AppConfig
+from locoder.config import CHAT_LAYOUTS, AppConfig, save_global_setting
 from locoder.context import ContextManager
 from locoder.providers.base import Message, ProviderError
 from locoder.providers.registry import create_provider
@@ -25,7 +26,7 @@ from locoder.tui.chat_input import ChatInput
 from locoder.tui.commands import build_file_index, expand_file_mentions, find_command
 from locoder.recent import RecentItem, recent_conversations, recent_files, recent_projects
 from locoder.tui.home import HomeFooter, HomeLogo, HomeRecent, RecentList, where_it_runs
-from locoder.tui.modals import ConfirmModal, HelpModal, SelectModal, SettingsModal, conversation_options
+from locoder.tui.modals import AskModal, ConfirmModal, HelpModal, SelectModal, SettingsModal, conversation_options
 from locoder.tui.tui_ui import TuiUI
 from locoder.tui.widgets import ChatLog, Sidebar, StatusBar
 
@@ -33,6 +34,26 @@ CSS_PATH = str(Path(__file__).parent / "app.tcss")
 ATTACHED_FILE_MARKER = "\n\n### Attached file: "
 # Matches #sidebar { width } in app.tcss; the collapse animation runs to and from it.
 SIDEBAR_WIDTH = 34
+CENTER_BAND = 96  # columns: the conversation's width in the center layout
+
+
+class MainColumn(Vertical):
+    """The conversation column. In the center layout it pads itself so the
+    conversation is a CENTER_BAND-wide band in the middle - explicit padding
+    rather than CSS alignment, which some terminals were seen to ignore."""
+
+    def on_resize(self, event) -> None:
+        self.center_band(event.size.width)
+
+    def center_band(self, width: Optional[int] = None) -> None:
+        width = self.size.width if width is None else width
+        screen = self.screen
+        if screen.has_class("layout-center") and not screen.has_class("home"):
+            free = max(0, width - CENTER_BAND)
+            left = free // 2
+            self.styles.padding = (0, free - left, 0, left)
+        else:
+            self.styles.padding = 0
 SIDEBAR_ANIMATION = 0.22
 
 # Saved tool messages don't record success/failure; these openings are how
@@ -62,6 +83,9 @@ class LocoderApp(App):
     CSS_PATH = CSS_PATH
     BINDINGS = [Binding("ctrl+b", "toggle_sidebar", "toggle sidebar", show=False)]
     TITLE = "locoder"
+    # Where /layout saves its choice; None is ~/.locoder/config.yaml (tests point it elsewhere).
+    settings_file: Optional[Path] = None
+    chat_layout = "left"
 
     def __init__(self, agent: Agent, session: SessionStore, config: AppConfig, project_root: Path) -> None:
         super().__init__()
@@ -84,7 +108,7 @@ class LocoderApp(App):
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="body"):
-            with Vertical(id="main-column"):
+            with MainColumn(id="main-column"):
                 yield HomeLogo(id="home-logo")
                 yield ChatLog(id="chatlog")
                 yield OptionList(id="slash-popup")
@@ -131,6 +155,8 @@ class LocoderApp(App):
         self._refresh_status_bar()
         self.query_one(HomeFooter).show(self.project_root)
         self.status_bar.set_project(str(self.project_root))
+        self.sidebar.set_web(self.agent.web)
+        self._apply_layout(self.config.chat_layout)
         self._show_home(True)
         for warning in self.config.warnings:
             self._warn(warning)
@@ -183,6 +209,7 @@ class LocoderApp(App):
         self._home_notes = []
         self._render_home_notice()
         self.screen.set_class(on, "home")
+        self.query_one(MainColumn).center_band()
         if on:
             self._load_recent()
         self.chat_input.focus()
@@ -223,6 +250,32 @@ class LocoderApp(App):
             self.chat_input.focus()
         elif item.kind == "project":
             self.exit(SwitchProject(Path(item.value)))
+
+    # -- where the conversation sits (/layout) ---------------------------------
+
+    def _apply_layout(self, layout: str) -> None:
+        self.chat_layout = layout if layout in CHAT_LAYOUTS else "left"
+        for name in CHAT_LAYOUTS:
+            self.screen.set_class(name == self.chat_layout, f"layout-{name}")
+        self.query_one(MainColumn).center_band()
+
+    def _choose_layout(self, arg: str) -> None:
+        """/layout steps left -> center -> right; /layout <name> picks one.
+        Kept in ~/.locoder/config.yaml so it's the same next time."""
+        choice = arg.strip().lower().replace("centre", "center").replace("middle", "center")
+        if not choice:
+            choice = CHAT_LAYOUTS[(CHAT_LAYOUTS.index(self.chat_layout) + 1) % len(CHAT_LAYOUTS)]
+        if choice not in CHAT_LAYOUTS:
+            self._say("warn", f"layout is one of: {', '.join(CHAT_LAYOUTS)}")
+            return
+        self._apply_layout(choice)
+        try:
+            save_global_setting("chat_layout", choice, global_config_path=self.settings_file)
+            saved = "kept for next time"
+        except OSError as exc:
+            saved = f"couldn't save it for next time ({exc})"
+        where = {"left": "on the left", "center": "in the middle", "right": "on the right"}[choice]
+        self._say("system", f"layout: conversation {where} - {saved}")
 
     def action_toggle_sidebar(self) -> None:
         """Ctrl+B or /sidebar: the sidebar narrows and fades out (or grows
@@ -359,6 +412,13 @@ class LocoderApp(App):
             self.agent.set_provider(self.agent.provider.with_think(thinking))
             self._say("system", "thinking on - slower, more careful" if thinking
                       else "thinking off - much faster, a bit less careful (this session only)")
+        elif command.name == "web":
+            self.agent.set_web(not self.agent.web)
+            self.sidebar.set_web(self.agent.web)
+            self._say("system", "web on - the model can search the web and read pages (this session only)"
+                      if self.agent.web else "web off - no web search or page fetching")
+        elif command.name == "layout":
+            self._choose_layout(arg)
         elif command.name == "sidebar":
             self.action_toggle_sidebar()
         elif command.name == "tokens":
@@ -399,6 +459,13 @@ class LocoderApp(App):
     async def request_confirm(self, title: str, preview: str, lang: str, reasons: list[str] | None = None) -> bool:
         result = await self.push_screen_wait(ConfirmModal(title, preview, lang, reasons=reasons))
         return bool(result)
+
+    async def request_answer(self, question: str, options: list[str]) -> str | None:
+        return await self.push_screen_wait(AskModal(question, options))
+
+    def show_notification(self, title: str, message: str) -> None:
+        self.chat_log.add_info(f"notification: {title} - {message}")
+        self.notify(message, title=title, timeout=8)
 
     # -- model picker -----------------------------------------------------------
 

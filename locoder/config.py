@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any, Optional
@@ -22,6 +23,10 @@ DEFAULT_MODEL = "qwen3.5:4b"
 
 # Keys a project's .locoder/config.yaml is not allowed to set.
 GLOBAL_ONLY_KEYS = ("yolo", "allowed_paths")
+
+# Where the full-screen app puts the conversation (/layout): beside the
+# sidebar on the left, a narrower band in the middle, or mirrored on the right.
+CHAT_LAYOUTS = ("left", "center", "right")
 
 # Keys the settings screen edits, and so writes back to the project file.
 PROJECT_SETTINGS_KEYS = ("provider", "model", "base_url", "temperature", "num_ctx", "think")
@@ -44,6 +49,11 @@ timeout: 120
 # think: false skips the model's long "thinking" step - much faster answers,
 # a bit less careful on hard problems (only affects models that think, on Ollama)
 think: true
+# web: true lets the model search the web and read pages (off by default:
+# queries go to the internet). Toggle it for a session with /web.
+web: false
+# brave_api_key / tavily_api_key: optional; put them in ~/.locoder/config.yaml,
+# not here. Without one, search uses DuckDuckGo, with Wikipedia as backup.
 # yolo and allowed_paths are ignored here for safety (a cloned repo could ship
 # this file); set them in ~/.locoder/config.yaml or pass --yolo instead.
 """
@@ -54,6 +64,31 @@ _KEY_COMMENTS = {
     "context_compaction_threshold": "fraction of num_ctx at which old turns get summarized/truncated",
     "api_key": "api_key: only needed for hosted OpenAI-compatible endpoints",
 }
+
+
+def save_global_setting(key: str, value: Any, *, global_config_path: Optional[Path] = None) -> Path:
+    """Set one key in ~/.locoder/config.yaml, leaving every other line - and
+    comment, and secret - exactly as it was."""
+    path = global_config_path or Path.home() / ".locoder" / "config.yaml"
+    new_line = f"{key}: {json.dumps(value)}"
+    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    pattern = re.compile(rf"^{re.escape(key)}\s*:")
+    for i, line in enumerate(lines):
+        if pattern.match(line):
+            lines[i] = new_line
+            break
+    else:
+        lines.append(new_line)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+def _same_file(a: Path, b: Path) -> bool:
+    try:
+        return a.resolve() == b.resolve()
+    except OSError:
+        return False
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -76,6 +111,13 @@ class AppConfig:
     # False asks a thinking model (Ollama's qwen3 etc.) to skip its long
     # "thinking" step: far faster answers, a bit less careful on hard problems.
     think: bool = True
+    # Web search / fetch tools. Off by default: queries leave the machine.
+    web: bool = False
+    # Brave Search API key; web search falls back to DuckDuckGo without one.
+    brave_api_key: Optional[str] = None
+    # Tavily API key: used for web search when there's no Brave key.
+    tavily_api_key: Optional[str] = None
+    chat_layout: str = "left"
     yolo: bool = False
     allowed_paths: list[str] = field(default_factory=list)
     # Not a config key: problems noticed while loading, for the UI to show.
@@ -103,7 +145,10 @@ class AppConfig:
 
         data: dict[str, Any] = dict(_read_yaml(global_path))
 
-        project_data = _read_yaml(project_path)
+        # Run from the home folder, the "project" file is the global one: it
+        # was just read as global, so don't read it again as an untrusted
+        # project file (that would wrongly ignore yolo/allowed_paths in it).
+        project_data = {} if _same_file(project_path, global_path) else _read_yaml(project_path)
         blocked = [k for k in GLOBAL_ONLY_KEYS if k in project_data]
         for key in blocked:
             project_data.pop(key)
@@ -119,6 +164,8 @@ class AppConfig:
             "LOCODER_MODEL": "model",
             "LOCODER_BASE_URL": "base_url",
             "LOCODER_API_KEY": "api_key",
+            "BRAVE_API_KEY": "brave_api_key",
+            "TAVILY_API_KEY": "tavily_api_key",
         }
         for env_var, key in env_map.items():
             if os.environ.get(env_var):
@@ -126,6 +173,9 @@ class AppConfig:
 
         known = cls._field_names()
         config = cls(**{k: v for k, v in data.items() if k in known})
+        if config.chat_layout not in CHAT_LAYOUTS:
+            warnings.append(f"chat_layout {config.chat_layout!r} isn't one of {', '.join(CHAT_LAYOUTS)}; using left")
+            config.chat_layout = "left"
         config.warnings = warnings
 
         if provider_override:
@@ -153,16 +203,20 @@ class AppConfig:
             "think": self.think,
         }
 
-    def save(self, project_root: Path) -> Path:
+    def save(self, project_root: Path, *, global_config_path: Optional[Path] = None) -> Path:
         """Write the settings-screen fields into the project config, keeping
         whatever else that file already had. Values that came from the global
         config or environment (an API key, say) are not copied into it, and
-        global-only keys are never written there.
+        global-only keys are never written there - unless the project file is
+        the global file (run from the home folder), where they're kept as they are.
         """
         config_path = project_root / ".locoder" / "config.yaml"
+        global_path = global_config_path or Path.home() / ".locoder" / "config.yaml"
+        keep_global_only = _same_file(config_path, global_path)
         known = self._field_names()
         data = {
-            k: v for k, v in _read_yaml(config_path).items() if k in known and k not in GLOBAL_ONLY_KEYS
+            k: v for k, v in _read_yaml(config_path).items()
+            if k in known and (keep_global_only or k not in GLOBAL_ONLY_KEYS)
         }
         for key in PROJECT_SETTINGS_KEYS:
             data[key] = getattr(self, key)
