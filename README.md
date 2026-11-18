@@ -5,9 +5,20 @@ OpenAI-compatible server: llama.cpp, vLLM, LM Studio) as its LLM backend.
 
 ## Install
 
+One line (Linux, macOS, Windows Git Bash):
+
 ```bash
-pip install -e .
+curl -fsSL https://raw.githubusercontent.com/lhuizach/Locoder/master/install.sh | sh
 ```
+
+Windows PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/lhuizach/Locoder/master/install.ps1 | iex
+```
+
+This installs [uv](https://docs.astral.sh/uv/) if needed, then locoder into its
+own isolated environment. Re-run it to update. For development: `pip install -e .`
 
 ## Quick start
 
